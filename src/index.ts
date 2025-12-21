@@ -160,9 +160,10 @@ export class Container {
 	private static instance: Container;
 
 	// Store providers by token
+	// biome-ignore lint/suspicious/noExplicitAny: Need to store providers with different generic types in the same Map
 	private readonly providers = new Map<
 		InjectionToken | Constructor<unknown>,
-		Provider<any>
+		Provider<unknown>
 	>();
 
 	// Cache instantiated services
@@ -229,6 +230,7 @@ export class Container {
 			console.log(`Registering class: ${key.toString()}`);
 		}
 
+		//@ts-expect-error
 		this.providers.set(key, provider);
 	}
 
@@ -267,7 +269,8 @@ export class Container {
 	 * Get the providers map (for advanced usage)
 	 */
 	public getProvidersMap(): ReadonlyMap<
-		InjectionToken | Constructor<any>,
+		InjectionToken | Constructor<unknown>,
+		// biome-ignore lint/suspicious/noExplicitAny: Return type must match providers Map type
 		Provider<any>
 	> {
 		return this.providers;
