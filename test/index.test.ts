@@ -1,17 +1,17 @@
 import 'reflect-metadata'
-import { expect, test, describe, beforeEach } from 'bun:test'
+import { beforeEach, describe, expect, test } from 'bun:test'
 import {
+	type ClassProvider,
 	Container,
-	Injectable,
+	type FactoryProvider,
+	forwardRef,
 	Inject,
+	Injectable,
 	Lazy,
 	LazyRef,
-	lazy,
-	forwardRef,
 	LazyRefMarker,
-	type ClassProvider,
+	lazy,
 	type ValueProvider,
-	type FactoryProvider,
 } from '../src'
 
 // ============================================================================
@@ -50,7 +50,7 @@ class DependentService {
 class MultiDependencyService {
 	constructor(
 		public basic: BasicService,
-		public dependent: DependentService
+		public dependent: DependentService,
 	) {}
 }
 
@@ -77,7 +77,9 @@ class ServiceALazy {
 }
 
 class ServiceBLazy {
-	constructor(@Inject(lazy(() => ServiceALazy)) public serviceA: ServiceALazy) {}
+	constructor(
+		@Inject(lazy(() => ServiceALazy)) public serviceA: ServiceALazy,
+	) {}
 }
 
 class ServiceCLazy {
@@ -112,7 +114,10 @@ class TrackedB {
 
 @Injectable()
 class TrackedC {
-	constructor(public a: TrackedA, public b: TrackedB) {
+	constructor(
+		public a: TrackedA,
+		public b: TrackedB,
+	) {
 		resolutionOrder.push('C')
 	}
 }
@@ -122,6 +127,7 @@ const resolutionOrder: string[] = []
 
 // Bad service for error handling tests
 @Injectable()
+// biome-ignore lint/correctness/noUnusedVariables: Used in error handling tests
 class BadService {
 	constructor(public config: { value: string }) {}
 }
@@ -248,8 +254,8 @@ describe('Class Provider', () => {
 		const provider: ClassProvider<BasicService> = {
 			provide: 'BasicService',
 			useClass: BasicService,
-			onInit: async (instance) => {
-				await new Promise(resolve => setTimeout(resolve, 10))
+			onInit: async (_instance) => {
+				await new Promise((resolve) => setTimeout(resolve, 10))
 				initValue = 42
 			},
 		}
@@ -345,7 +351,7 @@ describe('Factory Provider', () => {
 		const provider: FactoryProvider = {
 			provide: 'async-factory',
 			useFactory: async () => {
-				await new Promise(resolve => setTimeout(resolve, 10))
+				await new Promise((resolve) => setTimeout(resolve, 10))
 				return { async: true }
 			},
 		}
@@ -427,7 +433,9 @@ describe('Circular Dependencies', () => {
 		container.register({ provide: 'CircularA', useClass: CircularA })
 		container.register({ provide: 'CircularB', useClass: CircularB })
 
-		await expect(container.resolve('CircularA')).rejects.toThrow('Circular dependency detected')
+		await expect(container.resolve('CircularA')).rejects.toThrow(
+			'Circular dependency detected',
+		)
 	})
 
 	test('should support @Lazy pattern for lazy references', async () => {
@@ -540,7 +548,9 @@ describe('lazy() and forwardRef()', () => {
 		const container = Container.getContainer()
 
 		class ServiceWithLazy {
-			constructor(@Inject(lazy(() => BasicService)) public basic: BasicService) {}
+			constructor(
+				@Inject(lazy(() => BasicService)) public basic: BasicService,
+			) {}
 		}
 
 		container.register(BasicService)
@@ -582,7 +592,9 @@ describe('getInstance and getInstanceOrThrow', () => {
 		const container = Container.getContainer()
 		container.register(BasicService)
 
-		expect(() => container.getInstanceOrThrow(BasicService)).toThrow('Instance not resolved yet')
+		expect(() => container.getInstanceOrThrow(BasicService)).toThrow(
+			'Instance not resolved yet',
+		)
 	})
 
 	test('getInstanceOrThrow should return instance after resolution', async () => {
@@ -681,11 +693,17 @@ describe('getProvidersByWeight', () => {
 
 		const sorted = container.getProvidersByWeight()
 
+		// biome-ignore lint/style/noNonNullAssertion: We know the array has values in tests
 		expect(sorted[0]!.token).toBe(BasicService)
+		// biome-ignore lint/style/noNonNullAssertion: We know the array has values in tests
 		expect(sorted[0]!.weight).toBe(0)
+		// biome-ignore lint/style/noNonNullAssertion: We know the array has values in tests
 		expect(sorted[1]!.token).toBe(DependentService)
+		// biome-ignore lint/style/noNonNullAssertion: We know the array has values in tests
 		expect(sorted[1]!.weight).toBe(1)
+		// biome-ignore lint/style/noNonNullAssertion: We know the array has values in tests
 		expect(sorted[2]!.token).toBe(MultiDependencyService)
+		// biome-ignore lint/style/noNonNullAssertion: We know the array has values in tests
 		expect(sorted[2]!.weight).toBe(2)
 	})
 })
@@ -707,7 +725,9 @@ describe('resolveAll', () => {
 
 		expect(instances.get(BasicService)).toBeInstanceOf(BasicService)
 		expect(instances.get(DependentService)).toBeInstanceOf(DependentService)
-		expect(instances.get(MultiDependencyService)).toBeInstanceOf(MultiDependencyService)
+		expect(instances.get(MultiDependencyService)).toBeInstanceOf(
+			MultiDependencyService,
+		)
 	})
 
 	test('should resolve in optimal order', async () => {
@@ -808,7 +828,9 @@ describe('Error Handling', () => {
 
 	test('should throw when no provider found for token', async () => {
 		const container = Container.getContainer()
-		await expect(container.resolve('UNKNOWN_TOKEN')).rejects.toThrow('No provider found')
+		await expect(container.resolve('UNKNOWN_TOKEN')).rejects.toThrow(
+			'No provider found',
+		)
 	})
 
 	test('should handle errors in factory gracefully', async () => {
@@ -822,7 +844,9 @@ describe('Error Handling', () => {
 		}
 		container.register(provider)
 
-		await expect(container.resolve('error-factory')).rejects.toThrow('Factory error')
+		await expect(container.resolve('error-factory')).rejects.toThrow(
+			'Factory error',
+		)
 	})
 
 	test('should handle errors in onInit gracefully', async () => {
@@ -837,7 +861,9 @@ describe('Error Handling', () => {
 		}
 		container.register(provider)
 
-		await expect(container.resolve('BasicService')).rejects.toThrow('onInit error')
+		await expect(container.resolve('BasicService')).rejects.toThrow(
+			'onInit error',
+		)
 	})
 })
 
