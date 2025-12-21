@@ -359,7 +359,7 @@ describe('Factory Provider', () => {
 		const container = Container.getContainer()
 		let initCalled = false
 
-		const provider: FactoryProvider = {
+		const provider: FactoryProvider<{ value: string }> = {
 			provide: 'factory',
 			useFactory: () => ({ value: 'test' }),
 			onInit: async (instance) => {
