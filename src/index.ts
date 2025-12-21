@@ -56,8 +56,7 @@ export class LazyRef<T = unknown> {
 	 * Throws if not yet resolved
 	 */
 	get(): T {
-		// biome-ignore lint/suspicious/noExplicitAny: Type assertion needed for token type compatibility
-		return this.container.getInstanceOrThrow<T>(this.token as any)
+		return this.container.getInstanceOrThrow<T>(this.token)
 	}
 
 	/**
@@ -65,8 +64,7 @@ export class LazyRef<T = unknown> {
 	 * Throws if not yet resolved
 	 */
 	get value(): T {
-		// biome-ignore lint/suspicious/noExplicitAny: Type assertion needed for token type compatibility
-		return this.container.getInstanceOrThrow<T>(this.token as any)
+		return this.container.getInstanceOrThrow<T>(this.token)
 	}
 
 	/**
@@ -74,16 +72,14 @@ export class LazyRef<T = unknown> {
 	 * Returns undefined if not yet resolved
 	 */
 	tryGetValue(): T | undefined {
-		// biome-ignore lint/suspicious/noExplicitAny: Type assertion needed for token type compatibility
-		return this.container.getInstance<T>(this.token as any)
+		return this.container.getInstance<T>(this.token)
 	}
 
 	/**
 	 * Check if the instance has been resolved yet
 	 */
 	isResolved(): boolean {
-		// biome-ignore lint/suspicious/noExplicitAny: Type assertion needed for token type compatibility
-		return this.container.getInstance(this.token as any) !== undefined
+		return this.container.getInstance(this.token) !== undefined
 	}
 
 	/**
@@ -274,10 +270,8 @@ export class Container {
 	 * Get the instances map (for advanced usage)
 	 */
 	public getInstancesMap(): ReadonlyMap<
-		// biome-ignore lint/suspicious/noExplicitAny: Instances can be of any type
-		InjectionToken | Constructor<any>,
-		// biome-ignore lint/suspicious/noExplicitAny: Instances can be of any type
-		any
+		InjectionToken | Constructor<unknown>,
+		unknown
 	> {
 		return this.instances
 	}
@@ -378,23 +372,22 @@ export class Container {
 	/**
 	 * Instantiate a class by resolving its dependencies
 	 */
-	private async instantiateClass<T>(target: Constructor<T>): Promise<T> {
+	private async instantiateClass<T = unknown>(
+		target: Constructor<T>,
+	): Promise<T> {
 		console.log(`  -> Instantiating class: ${target.name}`)
 
 		// Get injection tokens if specified via @Inject decorator
-		// biome-ignore lint/suspicious/noExplicitAny: Injection tokens can be of any type
-		const injectionTokens: any[] =
+		const injectionTokens: unknown[] =
 			Reflect.getMetadata('inject:tokens', target) || []
 
 		// Get constructor parameter types
-		// biome-ignore lint/suspicious/noExplicitAny: Constructor parameters can be of any type
-		const paramTypes: Constructor<any>[] =
+		const paramTypes: Constructor<unknown>[] =
 			Reflect.getMetadata('design:paramtypes', target) || []
 
 		// Resolve dependencies SEQUENTIALLY to avoid false circular dependency errors
 		// when multiple parameters depend on the same service
-		// biome-ignore lint/suspicious/noExplicitAny: Dependencies can be of any type
-		const dependencies: any[] = []
+		const dependencies: unknown[] = []
 		for (let index = 0; index < paramTypes.length; index++) {
 			const paramType = paramTypes[index]
 			const token = injectionTokens[index]
@@ -403,6 +396,7 @@ export class Container {
 				// Check if it's the new @Lazy decorator pattern
 				if (token && typeof token === 'object' && '__lazyToken' in token) {
 					console.log(`    -> Creating LazyRef wrapper`)
+					// @ts-expect-error - token.__lazyToken is unknown but we know it's an InjectionToken
 					dependencies.push(new LazyRef(this, token.__lazyToken))
 					continue
 				}

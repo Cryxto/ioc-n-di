@@ -91,6 +91,7 @@ class ServiceCLazy {
 // Circular dependency test classes (forward declaration needed)
 @Injectable()
 class CircularB {
+	// biome-ignore lint/suspicious/noExplicitAny: Forward reference requires any to avoid initialization error
 	constructor(@Inject('CircularA') public a: any) {}
 }
 
