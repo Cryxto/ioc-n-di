@@ -409,10 +409,9 @@ export class Container {
 
 				// Check if it's the old lazy() function pattern (LazyRefMarker)
 				if (token instanceof LazyRefMarker) {
-					console.log(`    -> Resolving lazy reference (old style)`)
+					console.log(`    -> Creating LazyRef wrapper (old style)`)
 					const actualClass = token.ref()
-					// Skip circular dependency check for lazy references
-					dependencies.push(await this.resolve(actualClass, true))
+					dependencies.push(new LazyRef(this, actualClass))
 					continue
 				}
 

@@ -73,12 +73,14 @@ class ServiceD {
 }
 
 class ServiceALazy {
-	constructor(@Inject(ServiceBLazy) public serviceB: ServiceBLazy) {}
+	constructor(
+		@Inject(lazy(() => ServiceBLazy)) public serviceB: LazyRef<ServiceBLazy>,
+	) {}
 }
 
 class ServiceBLazy {
 	constructor(
-		@Inject(lazy(() => ServiceALazy)) public serviceA: ServiceALazy,
+		@Inject(lazy(() => ServiceALazy)) public serviceA: LazyRef<ServiceALazy>,
 	) {}
 }
 
@@ -88,13 +90,13 @@ class ServiceCLazy {
 
 // Circular dependency test classes (forward declaration needed)
 @Injectable()
-class CircularA {
-	constructor(@Inject(CircularB) public b: CircularB) {}
+class CircularB {
+	constructor(@Inject('CircularA') public a: any) {}
 }
 
 @Injectable()
-class CircularB {
-	constructor(@Inject(CircularA) public a: CircularA) {}
+class CircularA {
+	constructor(@Inject('CircularB') public b: CircularB) {}
 }
 
 // Tracked classes for resolution order testing
@@ -549,15 +551,19 @@ describe('lazy() and forwardRef()', () => {
 
 		class ServiceWithLazy {
 			constructor(
-				@Inject(lazy(() => BasicService)) public basic: BasicService,
+				@Inject(lazy(() => BasicService)) public basic: LazyRef<BasicService>,
 			) {}
 		}
 
 		container.register(BasicService)
 		container.register(ServiceWithLazy)
 
+		// Resolve BasicService first to populate the instance cache
+		await container.resolve(BasicService)
+
 		const instance = await container.resolve(ServiceWithLazy)
-		expect(instance.basic).toBeInstanceOf(BasicService)
+		expect(instance.basic).toBeInstanceOf(LazyRef)
+		expect(instance.basic.value).toBeInstanceOf(BasicService)
 	})
 
 	test('forwardRef should be alias of lazy', () => {
