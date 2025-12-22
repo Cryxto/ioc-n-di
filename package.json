@@ -1,6 +1,6 @@
 {
 	"name": "@cryxto/ioc-n-di",
-	"version": "0.2.4",
+	"version": "0.2.5",
 	"description": "Another Typescript IoC container and dependency injection utility",
 	"homepage": "https://github.com/Cryxto/ioc-n-di#readme",
 	"bugs": {
