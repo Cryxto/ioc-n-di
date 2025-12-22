@@ -6,6 +6,8 @@ A lightweight, type-safe TypeScript IoC (Inversion of Control) container and dep
 
 - **Type-safe dependency injection** using TypeScript decorators
 - **Multiple provider types**: Class, Value, and Factory providers
+- **NestJS-style bootstrapping** for easy application initialization
+- **Injectable metadata** for storing custom service information
 - **Lazy injection** support for circular dependencies
 - **Automatic dependency resolution** with circular dependency detection
 - **Lifecycle hooks** with `onInit` callbacks
@@ -245,9 +247,81 @@ const db = await container.resolve(DatabaseConnection);
 console.log(db.isConnected); // true
 ```
 
+### NestJS-Style Bootstrapping (Recommended)
+
+The easiest way to initialize your application - register and resolve all providers at once:
+
+```typescript
+import { Container, Injectable } from 'ioc-n-di';
+
+@Injectable()
+class ConfigService {
+  getPort() { return 3000; }
+}
+
+@Injectable()
+class DatabaseService {
+  constructor(private config: ConfigService) {}
+
+  async connect() {
+    console.log('Database connected');
+  }
+}
+
+@Injectable()
+class AppService {
+  constructor(
+    private config: ConfigService,
+    private db: DatabaseService,
+  ) {}
+}
+
+// Bootstrap everything at once
+const container = await Container.createOrGet().bootstrap([
+  ConfigService,
+  DatabaseService,
+  AppService,
+  // You can also mix in value and factory providers
+  { provide: 'API_KEY', useValue: 'secret-key' }
+]);
+
+// All services are now initialized and ready to use
+const app = container.getInstanceOrThrow(AppService);
+```
+
+Alternative syntax with configuration object:
+
+```typescript
+await container.bootstrap({
+  providers: [ConfigService, DatabaseService, AppService]
+});
+```
+
+### Injectable Metadata
+
+Store custom metadata with your services (useful for plugins, documentation, etc.):
+
+```typescript
+import { Injectable, getInjectableMetadata } from 'ioc-n-di';
+
+@Injectable({
+  metadata: {
+    role: 'service',
+    layer: 'data',
+    version: '1.0.0'
+  }
+})
+class UserService {}
+
+// Retrieve metadata at runtime
+const metadata = getInjectableMetadata(UserService);
+console.log(metadata?.metadata); // { role: 'service', layer: 'data', version: '1.0.0' }
+console.log(metadata?.scope);    // 'singleton'
+```
+
 ### Resolve All Dependencies
 
-Bootstrap your entire application at once:
+Manually resolve all registered providers in optimal order:
 
 ```typescript
 import { Container, Injectable } from 'ioc-n-di';
@@ -295,9 +369,11 @@ The main DI container (singleton pattern).
 
 #### Methods
 
-- `static getContainer(): Container` - Get the singleton container instance
+- `static createOrGet(): Container` - Get or create the singleton container instance
+- `static getContainer(): Container` - **Deprecated:** Use `createOrGet()` instead
 - `register<T>(provider: Provider<T>): void` - Register a provider
 - `resolve<T>(token: InjectionToken<T> | Constructor<T>): Promise<T>` - Resolve and return an instance
+- `bootstrap(providers: Provider[] | { providers: Provider[] }): Promise<this>` - **New:** Register and resolve all providers at once (NestJS-style)
 - `getInstance<T>(token: InjectionToken<T> | Constructor<T>): T | undefined` - Get cached instance synchronously
 - `getInstanceOrThrow<T>(token: InjectionToken<T> | Constructor<T>): T` - Get cached instance or throw
 - `resolveAll(): Promise<Map>` - Resolve all registered providers in optimal order
@@ -307,9 +383,14 @@ The main DI container (singleton pattern).
 
 ### Decorators
 
-- `@Injectable()` - Mark a class as injectable
+- `@Injectable(options?)` - Mark a class as injectable with optional metadata
+  - Options: `{ scope?: 'singleton', metadata?: Record<string, unknown> }`
 - `@Inject(token)` - Specify injection token for a constructor parameter
 - `@Lazy(token)` - Inject a lazy reference to handle circular dependencies
+
+### Utility Functions
+
+- `getInjectableMetadata(constructor)` - Retrieve metadata stored by `@Injectable()` decorator
 
 ### Provider Types
 
