@@ -20,7 +20,7 @@ import {
 
 function resetContainer() {
 	// Reset the singleton container instance for clean tests
-	const container = Container.getContainer()
+	const container = Container.createOrGet()
 	container.clear()
 	// Reset resolution order tracking
 	resolutionOrder.length = 0
@@ -149,8 +149,8 @@ describe('Container Singleton', () => {
 	beforeEach(resetContainer)
 
 	test('should return the same instance', () => {
-		const container1 = Container.getContainer()
-		const container2 = Container.getContainer()
+		const container1 = Container.createOrGet()
+		const container2 = Container.createOrGet()
 		expect(container1).toBe(container2)
 	})
 })
@@ -163,7 +163,7 @@ describe('Basic Registration and Resolution', () => {
 	beforeEach(resetContainer)
 
 	test('should register and resolve a plain class', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		const instance = await container.resolve(BasicService)
 
@@ -172,7 +172,7 @@ describe('Basic Registration and Resolution', () => {
 	})
 
 	test('should cache resolved instances', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 
 		const instance1 = await container.resolve(BasicService)
@@ -182,7 +182,7 @@ describe('Basic Registration and Resolution', () => {
 	})
 
 	test('should resolve dependencies automatically', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		container.register(DependentService)
 
@@ -194,7 +194,7 @@ describe('Basic Registration and Resolution', () => {
 	})
 
 	test('should resolve multiple dependencies', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		container.register(DependentService)
 		container.register(MultiDependencyService)
@@ -206,7 +206,7 @@ describe('Basic Registration and Resolution', () => {
 	})
 
 	test('should resolve unregistered class if it is a constructor', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		const instance = await container.resolve(BasicService)
 
 		expect(instance).toBeInstanceOf(BasicService)
@@ -221,7 +221,7 @@ describe('Class Provider', () => {
 	beforeEach(resetContainer)
 
 	test('should register and resolve class provider', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		const provider: ClassProvider = {
 			provide: 'BasicService',
 			useClass: BasicService,
@@ -233,7 +233,7 @@ describe('Class Provider', () => {
 	})
 
 	test('should call onInit lifecycle hook', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		let initCalled = false
 
 		const provider: ClassProvider<BasicService> = {
@@ -251,7 +251,7 @@ describe('Class Provider', () => {
 	})
 
 	test('should support async onInit hook', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		let initValue = 0
 
 		const provider: ClassProvider<BasicService> = {
@@ -277,7 +277,7 @@ describe('Value Provider', () => {
 	beforeEach(resetContainer)
 
 	test('should register and resolve value provider', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		const value = { key: 'value' }
 		const provider: ValueProvider = {
 			provide: 'config',
@@ -290,7 +290,7 @@ describe('Value Provider', () => {
 	})
 
 	test('should support primitive values', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 
 		container.register({ provide: 'string', useValue: 'hello' })
 		container.register({ provide: 'number', useValue: 42 })
@@ -304,7 +304,7 @@ describe('Value Provider', () => {
 	})
 
 	test('should cache value provider instances immediately', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		const value = { key: 'value' }
 		container.register({ provide: 'config', useValue: value })
 
@@ -321,7 +321,7 @@ describe('Factory Provider', () => {
 	beforeEach(resetContainer)
 
 	test('should register and resolve factory provider', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		const provider: FactoryProvider = {
 			provide: 'factory',
 			useFactory: () => ({ created: 'by-factory' }),
@@ -333,7 +333,7 @@ describe('Factory Provider', () => {
 	})
 
 	test('should resolve factory dependencies', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 
 		const provider: FactoryProvider = {
@@ -350,7 +350,7 @@ describe('Factory Provider', () => {
 	})
 
 	test('should support async factory', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		const provider: FactoryProvider = {
 			provide: 'async-factory',
 			useFactory: async () => {
@@ -365,7 +365,7 @@ describe('Factory Provider', () => {
 	})
 
 	test('should call onInit for factory provider', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		let initCalled = false
 
 		const provider: FactoryProvider<{ value: string }> = {
@@ -391,7 +391,7 @@ describe('Injection Tokens', () => {
 	beforeEach(resetContainer)
 
 	test('should use string tokens', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register({ provide: 'MY_TOKEN', useValue: 'token-value' })
 
 		const value = await container.resolve('MY_TOKEN')
@@ -399,7 +399,7 @@ describe('Injection Tokens', () => {
 	})
 
 	test('should use symbol tokens', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		const TOKEN = Symbol('MY_TOKEN')
 		container.register({ provide: TOKEN, useValue: 'symbol-value' })
 
@@ -408,7 +408,7 @@ describe('Injection Tokens', () => {
 	})
 
 	test('should inject using @Inject decorator', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		const TOKEN = 'MY_SERVICE'
 
 		@Injectable()
@@ -432,7 +432,7 @@ describe('Circular Dependencies', () => {
 	beforeEach(resetContainer)
 
 	test('should detect circular dependencies', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register({ provide: 'CircularA', useClass: CircularA })
 		container.register({ provide: 'CircularB', useClass: CircularB })
 
@@ -442,7 +442,7 @@ describe('Circular Dependencies', () => {
 	})
 
 	test('should support @Lazy pattern for lazy references', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(ServiceCLazy)
 		container.register(ServiceD)
 
@@ -468,7 +468,7 @@ describe('LazyRef', () => {
 	beforeEach(resetContainer)
 
 	test('should create LazyRef with @Lazy decorator', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(ServiceCLazy)
 		container.register(ServiceD)
 
@@ -477,7 +477,7 @@ describe('LazyRef', () => {
 	})
 
 	test('should get value from LazyRef', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(ServiceD)
 
 		const lazyRef = new LazyRef(container, ServiceD)
@@ -489,7 +489,7 @@ describe('LazyRef', () => {
 	})
 
 	test('should access value property', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(ServiceD)
 		await container.resolve(ServiceD)
 
@@ -498,21 +498,21 @@ describe('LazyRef', () => {
 	})
 
 	test('should throw when getting unresolved LazyRef', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		const lazyRef = new LazyRef(container, ServiceD)
 
 		expect(() => lazyRef.get()).toThrow('Instance not resolved yet')
 	})
 
 	test('should tryGetValue on unresolved LazyRef', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		const lazyRef = new LazyRef(container, ServiceD)
 
 		expect(lazyRef.tryGetValue()).toBeUndefined()
 	})
 
 	test('should check isResolved', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(ServiceD)
 		const lazyRef = new LazyRef(container, ServiceD)
 
@@ -523,7 +523,7 @@ describe('LazyRef', () => {
 	})
 
 	test('should reset LazyRef', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(ServiceD)
 		await container.resolve(ServiceD)
 
@@ -548,7 +548,7 @@ describe('lazy() and forwardRef()', () => {
 	})
 
 	test('should resolve lazy reference', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 
 		class ServiceWithLazy {
 			constructor(
@@ -580,14 +580,14 @@ describe('getInstance and getInstanceOrThrow', () => {
 	beforeEach(resetContainer)
 
 	test('getInstance should return undefined for unresolved', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 
 		expect(container.getInstance(BasicService)).toBeUndefined()
 	})
 
 	test('getInstance should return instance after resolution', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		await container.resolve(BasicService)
 
@@ -596,7 +596,7 @@ describe('getInstance and getInstanceOrThrow', () => {
 	})
 
 	test('getInstanceOrThrow should throw for unresolved', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 
 		expect(() => container.getInstanceOrThrow(BasicService)).toThrow(
@@ -605,7 +605,7 @@ describe('getInstance and getInstanceOrThrow', () => {
 	})
 
 	test('getInstanceOrThrow should return instance after resolution', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		await container.resolve(BasicService)
 
@@ -614,7 +614,7 @@ describe('getInstance and getInstanceOrThrow', () => {
 	})
 
 	test('getInstanceOrThrow should handle falsy values correctly', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 
 		container.register({ provide: 'zero', useValue: 0 })
 		container.register({ provide: 'false', useValue: false })
@@ -634,21 +634,21 @@ describe('Weight Calculation', () => {
 	beforeEach(resetContainer)
 
 	test('should calculate weight for value provider', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register({ provide: 'value', useValue: 'test' })
 
 		expect(container.calculateWeight('value')).toBe(0)
 	})
 
 	test('should calculate weight for service with no dependencies', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 
 		expect(container.calculateWeight(BasicService)).toBe(0)
 	})
 
 	test('should calculate weight for service with dependencies', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		container.register(DependentService)
 
@@ -656,7 +656,7 @@ describe('Weight Calculation', () => {
 	})
 
 	test('should calculate weight for multi-level dependencies', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		container.register(DependentService)
 		container.register(MultiDependencyService)
@@ -665,7 +665,7 @@ describe('Weight Calculation', () => {
 	})
 
 	test('should cache weight calculations', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 
 		const weight1 = container.calculateWeight(BasicService)
@@ -676,7 +676,7 @@ describe('Weight Calculation', () => {
 	})
 
 	test('should skip lazy dependencies in weight calculation', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(ServiceC)
 		container.register(ServiceD)
 
@@ -693,7 +693,7 @@ describe('getProvidersByWeight', () => {
 	beforeEach(resetContainer)
 
 	test('should return providers sorted by weight', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(MultiDependencyService)
 		container.register(BasicService)
 		container.register(DependentService)
@@ -723,7 +723,7 @@ describe('resolveAll', () => {
 	beforeEach(resetContainer)
 
 	test('should resolve all providers', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		container.register(DependentService)
 		container.register(MultiDependencyService)
@@ -738,7 +738,7 @@ describe('resolveAll', () => {
 	})
 
 	test('should resolve in optimal order', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(TrackedC)
 		container.register(TrackedA)
 		container.register(TrackedB)
@@ -749,7 +749,7 @@ describe('resolveAll', () => {
 	})
 
 	test('should handle lazy dependencies in resolveAll', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(ServiceC)
 		container.register(ServiceD)
 
@@ -768,7 +768,7 @@ describe('getDependencyGraph', () => {
 	beforeEach(resetContainer)
 
 	test('should return dependency graph', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		container.register(DependentService)
 
@@ -787,7 +787,7 @@ describe('getDependencyGraph', () => {
 	})
 
 	test('should handle multi-level dependencies in graph', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		container.register(DependentService)
 		container.register(MultiDependencyService)
@@ -809,7 +809,7 @@ describe('getInstancesMap and getProvidersMap', () => {
 	beforeEach(resetContainer)
 
 	test('should return read-only instances map', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		await container.resolve(BasicService)
 
@@ -818,7 +818,7 @@ describe('getInstancesMap and getProvidersMap', () => {
 	})
 
 	test('should return read-only providers map', () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 
 		const map = container.getProvidersMap()
@@ -834,14 +834,14 @@ describe('Error Handling', () => {
 	beforeEach(resetContainer)
 
 	test('should throw when no provider found for token', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		await expect(container.resolve('UNKNOWN_TOKEN')).rejects.toThrow(
 			'No provider found',
 		)
 	})
 
 	test('should handle errors in factory gracefully', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 
 		const provider: FactoryProvider = {
 			provide: 'error-factory',
@@ -857,7 +857,7 @@ describe('Error Handling', () => {
 	})
 
 	test('should handle errors in onInit gracefully', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 
 		const provider: ClassProvider<BasicService> = {
 			provide: 'BasicService',
@@ -882,7 +882,7 @@ describe('Edge Cases', () => {
 	beforeEach(resetContainer)
 
 	test('should handle registering same provider twice', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(BasicService)
 		container.register(BasicService)
 
@@ -891,7 +891,7 @@ describe('Edge Cases', () => {
 	})
 
 	test('should handle empty dependencies array', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 		container.register(EmptyDepsService)
 		const instance = await container.resolve(EmptyDepsService)
 
@@ -899,7 +899,7 @@ describe('Edge Cases', () => {
 	})
 
 	test('should handle value provider with falsy values', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 
 		container.register({ provide: 'zero', useValue: 0 })
 		container.register({ provide: 'false', useValue: false })
@@ -911,7 +911,7 @@ describe('Edge Cases', () => {
 	})
 
 	test('should handle factory with no dependencies', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 
 		const provider: FactoryProvider = {
 			provide: 'no-deps',
@@ -925,7 +925,7 @@ describe('Edge Cases', () => {
 	})
 
 	test('should handle class provider with same class as token', async () => {
-		const container = Container.getContainer()
+		const container = Container.createOrGet()
 
 		const provider: ClassProvider<BasicService> = {
 			provide: BasicService,

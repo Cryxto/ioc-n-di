@@ -64,7 +64,7 @@ class UserService {
 }
 
 // Bootstrap
-const container = Container.getContainer();
+const container = Container.createOrGet();
 container.register(Logger);
 container.register(UserService);
 
@@ -98,7 +98,7 @@ class UserRepository {
   }
 }
 
-const container = Container.getContainer();
+const container = Container.createOrGet();
 container.register(Database);
 container.register(UserRepository);
 
@@ -129,7 +129,7 @@ class ApiService {
   }
 }
 
-const container = Container.getContainer();
+const container = Container.createOrGet();
 
 // Register value providers
 container.register({
@@ -205,7 +205,7 @@ class ServiceB {
   }
 }
 
-const container = Container.getContainer();
+const container = Container.createOrGet();
 container.register(ServiceA);
 container.register(ServiceB);
 
@@ -274,7 +274,7 @@ class AppService {
   ) {}
 }
 
-const container = Container.getContainer();
+const container = Container.createOrGet();
 container.register(ConfigService);
 container.register(LoggerService);
 container.register(DatabaseService);
@@ -390,7 +390,7 @@ describe('MyService', () => {
   let container: Container;
 
   beforeEach(() => {
-    container = Container.getContainer();
+    container = Container.createOrGet();
     container.clear(); // Clear between tests
   });
 

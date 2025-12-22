@@ -135,7 +135,7 @@ async function bootstrapApp() {
 	console.log('  NestJS-Style Bootstrapping Example')
 	console.log('═══════════════════════════════════════════════════════\n')
 
-	const container = Container.getContainer()
+	const container = Container.createOrGet()
 
 	// Bootstrap with providers (NestJS-style)
 	await container.bootstrap([
@@ -197,7 +197,7 @@ async function bootstrapApp() {
 	console.log('═══════════════════════════════════════════════════════\n')
 
 	// Clear container for demonstration
-	const container2 = Container.getContainer()
+	const container2 = Container.createOrGet()
 	container2.clear()
 
 	// Alternative bootstrap syntax (object-based)

@@ -235,11 +235,18 @@ export class Container {
 
 	private constructor() {}
 
-	public static getContainer(): Container {
+	public static createOrGet(): Container {
 		if (!Container.instance) {
 			Container.instance = new Container()
 		}
 		return Container.instance
+	}
+
+	/**
+	 * @deprecated Use createOrGet() instead
+	 */
+	public static getContainer(): Container {
+		return Container.createOrGet()
 	}
 
 	/**
