@@ -26,6 +26,6 @@
 		"experimentalDecorators": true
 	},
 
-	"include": ["src/**/*", "test/**/*"],
+	"include": ["src/**/*", "test/**/*", "examples/**/*"],
 	"exclude": ["node_modules", "dist", "bunup.config.ts"]
 }

@@ -135,9 +135,45 @@ export type ForwardRef<T = unknown> = LazyRefMarker<T>
 // Decorators
 // ============================================================================
 
-export function Injectable(): ClassDecorator {
-	return (_target: object) => {
-		// Marks class as injectable
+/**
+ * Options for @Injectable decorator
+ * Stores metadata for future extensibility (similar to NestJS)
+ */
+export interface InjectableOptions {
+	/**
+	 * Scope of the injectable service
+	 * - singleton (default): Single instance shared across the container
+	 * - transient: New instance created each time (future feature)
+	 * - request: Instance scoped to request lifecycle (future feature)
+	 */
+	scope?: 'singleton' | 'transient' | 'request'
+
+	/**
+	 * Custom metadata for the injectable
+	 */
+	metadata?: Record<string, unknown>
+
+	/**
+	 * Additional options (for future extensibility)
+	 */
+	[key: string]: unknown
+}
+
+/**
+ * Injectable decorator - marks a class as injectable and stores metadata
+ * Usage:
+ * - @Injectable() - Simple usage
+ * - @Injectable({ scope: 'singleton' }) - With options
+ * - @Injectable({ metadata: { role: 'service' } }) - With custom metadata
+ */
+export function Injectable(options?: InjectableOptions): ClassDecorator {
+	return (target: object) => {
+		// Store injectable metadata for future use
+		const metadata = {
+			scope: 'singleton',
+			...(options || {}),
+		}
+		Reflect.defineMetadata('injectable:options', metadata, target)
 	}
 }
 
@@ -154,6 +190,17 @@ export function Inject(
 		existingTokens[parameterIndex] = token
 		Reflect.defineMetadata('inject:tokens', existingTokens, target)
 	}
+}
+
+/**
+ * Get injectable metadata from a class
+ * @param target - The class to get metadata from
+ * @returns The injectable options or undefined if not decorated with @Injectable
+ */
+export function getInjectableMetadata(
+	target: Constructor<unknown>,
+): InjectableOptions | undefined {
+	return Reflect.getMetadata('injectable:options', target)
 }
 
 // ============================================================================
@@ -677,6 +724,49 @@ export class Container {
 
 		console.log('\n✅ All providers resolved!\n')
 		return this.instances
+	}
+
+	/**
+	 * Bootstrap the container with a list of providers (NestJS-style)
+	 * This is a convenient way to register and resolve multiple providers at once
+	 *
+	 * @param providers - Array of providers (classes or provider objects)
+	 * @returns The container instance (for chaining)
+	 *
+	 * @example
+	 * // Simple usage
+	 * await container.bootstrap([
+	 *   ServiceA,
+	 *   ServiceB,
+	 *   { provide: 'CONFIG', useValue: { port: 3000 } }
+	 * ])
+	 *
+	 * @example
+	 * // With configuration
+	 * const container = await Container.getContainer().bootstrap({
+	 *   providers: [UserService, DatabaseService, AuthService]
+	 * })
+	 */
+	public async bootstrap(
+		providersOrConfig: Provider[] | { providers: Provider[] },
+	): Promise<this> {
+		console.log('\n🚀 Bootstrapping container...\n')
+
+		// Handle both array and object format
+		const providers = Array.isArray(providersOrConfig)
+			? providersOrConfig
+			: providersOrConfig.providers
+
+		// Register all providers
+		for (const provider of providers) {
+			this.register(provider)
+		}
+
+		// Resolve all providers
+		await this.resolveAll()
+
+		console.log('🎉 Container bootstrapped successfully!\n')
+		return this
 	}
 
 	/**
