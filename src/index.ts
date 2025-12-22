@@ -4,33 +4,97 @@ import 'reflect-metadata'
 // Type Definitions
 // ============================================================================
 
+/**
+ * A constructor function that creates instances of type T
+ * @template T - The type of instance the constructor creates
+ * @example
+ * class MyService {}
+ * const ctor: Constructor<MyService> = MyService
+ */
 // biome-ignore lint/suspicious/noExplicitAny: Constructor args can be any type
 export type Constructor<T = unknown> = new (...args: any[]) => T
 
-// Injection token - can be a string, symbol, or constructor
+/**
+ * Token used to identify a dependency in the container
+ * Can be a string, symbol, or class constructor
+ * @template T - The type of value associated with this token
+ * @example
+ * const TOKEN: InjectionToken<string> = 'MY_TOKEN'
+ * const SYMBOL_TOKEN: InjectionToken<number> = Symbol('COUNT')
+ * const CLASS_TOKEN: InjectionToken<MyService> = MyService
+ */
 export type InjectionToken<T = unknown> = string | symbol | Constructor<T>
 
-// Provider types
+/**
+ * Provider that uses a class constructor to create instances
+ * @template T - The type of instance to create
+ * @example
+ * {
+ *   provide: 'MyService',
+ *   useClass: MyServiceImpl,
+ *   onInit: async (instance) => await instance.initialize()
+ * }
+ */
 export interface ClassProvider<T = unknown> {
+	/** Token to identify this provider */
 	provide: InjectionToken<T>
+	/** Class constructor to instantiate */
 	useClass: Constructor<T>
+	/** Optional lifecycle hook called after instantiation */
 	onInit?: (instance: T) => Promise<void> | void
 }
 
+/**
+ * Provider that uses a pre-existing value
+ * @template T - The type of the value
+ * @example
+ * {
+ *   provide: 'CONFIG',
+ *   useValue: { port: 3000, host: 'localhost' }
+ * }
+ */
 export interface ValueProvider<T = unknown> {
+	/** Token to identify this provider */
 	provide: InjectionToken<T>
+	/** The value to provide */
 	useValue: T
 }
 
+/**
+ * Provider that uses a factory function to create instances
+ * @template T - The type of instance to create
+ * @example
+ * {
+ *   provide: 'DATABASE',
+ *   useFactory: (config: Config) => new Database(config),
+ *   deps: [ConfigService],
+ *   onInit: async (db) => await db.connect()
+ * }
+ */
 export interface FactoryProvider<T = unknown> {
+	/** Token to identify this provider */
 	provide: InjectionToken<T>
+	/** Factory function to create the instance */
 	// biome-ignore lint/suspicious/noExplicitAny: Factory function args can be any type
 	useFactory: (...args: any[]) => T | Promise<T>
+	/** Optional dependencies to inject into the factory function */
 	// biome-ignore lint/suspicious/noExplicitAny: Dependencies can be of any type
 	deps?: (InjectionToken | Constructor<any>)[]
+	/** Optional lifecycle hook called after instantiation */
 	onInit?: (instance: T) => Promise<void> | void
 }
 
+/**
+ * Union type of all possible provider configurations
+ * @template T - The type of instance to create
+ * @example
+ * const providers: Provider[] = [
+ *   MyService,  // Plain class
+ *   { provide: 'TOKEN', useClass: MyServiceImpl },
+ *   { provide: 'VALUE', useValue: 42 },
+ *   { provide: 'FACTORY', useFactory: () => createService() }
+ * ]
+ */
 export type Provider<T = unknown> =
 	| Constructor<T>
 	| ClassProvider<T>
@@ -43,7 +107,21 @@ export type Provider<T = unknown> =
 
 /**
  * LazyRef wrapper for lazy dependency injection
- * Usage: @Lazy(ServiceB) private serviceB: LazyRef<ServiceB>
+ *
+ * Allows breaking circular dependencies by deferring resolution until the dependency is accessed.
+ * The dependency is resolved from the container only when you call `.get()` or `.value`.
+ *
+ * @template T - The type of the lazy dependency
+ *
+ * @example
+ * class ServiceA {
+ *   constructor(@Lazy(ServiceB) private serviceB: LazyRef<ServiceB>) {}
+ *
+ *   doSomething() {
+ *     // ServiceB is resolved when you access it
+ *     this.serviceB.value.someMethod()
+ *   }
+ * }
  */
 export class LazyRef<T = unknown> {
 	constructor(
@@ -53,23 +131,40 @@ export class LazyRef<T = unknown> {
 
 	/**
 	 * Get the resolved instance synchronously
-	 * Throws if not yet resolved
+	 *
+	 * @returns The resolved instance
+	 * @throws {Error} If the instance has not been resolved yet
+	 *
+	 * @example
+	 * const instance = lazyRef.get()
 	 */
 	get(): T {
 		return this.container.getInstanceOrThrow<T>(this.token)
 	}
 
 	/**
-	 * Get the resolved instance synchronously
-	 * Throws if not yet resolved
+	 * Get the resolved instance synchronously via property accessor
+	 *
+	 * @returns The resolved instance
+	 * @throws {Error} If the instance has not been resolved yet
+	 *
+	 * @example
+	 * const result = lazyRef.value.someMethod()
 	 */
 	get value(): T {
 		return this.container.getInstanceOrThrow<T>(this.token)
 	}
 
 	/**
-	 * Try to get the resolved instance synchronously
-	 * Returns undefined if not yet resolved
+	 * Try to get the resolved instance synchronously without throwing
+	 *
+	 * @returns The resolved instance or undefined if not yet resolved
+	 *
+	 * @example
+	 * const instance = lazyRef.tryGetValue()
+	 * if (instance) {
+	 *   instance.doSomething()
+	 * }
 	 */
 	tryGetValue(): T | undefined {
 		return this.container.getInstance<T>(this.token)
@@ -77,14 +172,26 @@ export class LazyRef<T = unknown> {
 
 	/**
 	 * Check if the instance has been resolved yet
+	 *
+	 * @returns True if the instance is available, false otherwise
+	 *
+	 * @example
+	 * if (lazyRef.isResolved()) {
+	 *   console.log('Instance is ready')
+	 * }
 	 */
 	isResolved(): boolean {
 		return this.container.getInstance(this.token) !== undefined
 	}
 
 	/**
-	 * Reset the lazy reference (for testing)
-	 * Note: This clears the instance from the container cache
+	 * Reset the lazy reference (primarily for testing)
+	 *
+	 * Clears the instance from the container cache, allowing it to be re-resolved.
+	 * Use with caution in production code.
+	 *
+	 * @example
+	 * lazyRef.reset() // Instance will be re-created on next access
 	 */
 	reset(): void {
 		// biome-ignore lint/suspicious/noExplicitAny: Accessing private property for testing
@@ -95,22 +202,58 @@ export class LazyRef<T = unknown> {
 
 /**
  * Internal marker for lazy references (used by old lazy() function)
+ *
+ * @template T - The type of the lazy dependency
+ * @internal
  */
 export class LazyRefMarker<T = unknown> {
 	constructor(public readonly ref: () => Constructor<T>) {}
 }
 
 /**
- * Old-style lazy reference (for backward compatibility)
- * Usage: @Inject(lazy(() => ServiceB))
+ * Old-style lazy reference function (for backward compatibility)
+ *
+ * Creates a lazy reference marker that defers dependency resolution.
+ * Prefer using the `@Lazy()` decorator instead.
+ *
+ * @template T - The type of the lazy dependency
+ * @param fn - Function that returns the constructor to be lazily resolved
+ * @returns A lazy reference marker
+ *
+ * @deprecated Use @Lazy() decorator instead
+ *
+ * @example
+ * class ServiceA {
+ *   constructor(
+ *     @Inject(lazy(() => ServiceB)) private serviceB: LazyRef<ServiceB>
+ *   ) {}
+ * }
  */
 export function lazy<T>(fn: () => Constructor<T>): LazyRefMarker<T> {
 	return new LazyRefMarker(fn)
 }
 
 /**
- * New-style Lazy decorator (RECOMMENDED)
- * Usage: @Lazy(ServiceB) private serviceB: LazyRef<ServiceB>
+ * Lazy dependency injection decorator (RECOMMENDED)
+ *
+ * Injects a LazyRef wrapper that defers dependency resolution until accessed.
+ * This is useful for breaking circular dependencies.
+ *
+ * @template T - The type of the lazy dependency
+ * @param token - The injection token or class constructor to lazily resolve
+ * @returns A parameter decorator
+ *
+ * @example
+ * class ServiceA {
+ *   constructor(
+ *     @Lazy(ServiceB) private serviceB: LazyRef<ServiceB>
+ *   ) {}
+ *
+ *   doSomething() {
+ *     // ServiceB is resolved when accessed
+ *     this.serviceB.value.method()
+ *   }
+ * }
  */
 export function Lazy<T>(
 	token: Constructor<T> | InjectionToken<T>,
@@ -127,8 +270,18 @@ export function Lazy<T>(
 	}
 }
 
-// Alias for NestJS compatibility
+/**
+ * Alias for lazy() function (NestJS compatibility)
+ *
+ * @deprecated Use @Lazy() decorator instead
+ */
 export const forwardRef: typeof lazy = lazy
+
+/**
+ * Type alias for LazyRefMarker (NestJS compatibility)
+ *
+ * @template T - The type of the lazy dependency
+ */
 export type ForwardRef<T = unknown> = LazyRefMarker<T>
 
 // ============================================================================
@@ -160,11 +313,35 @@ export interface InjectableOptions {
 }
 
 /**
- * Injectable decorator - marks a class as injectable and stores metadata
- * Usage:
- * - @Injectable() - Simple usage
- * - @Injectable({ scope: 'singleton' }) - With options
- * - @Injectable({ metadata: { role: 'service' } }) - With custom metadata
+ * Injectable class decorator
+ *
+ * Marks a class as injectable and stores metadata for dependency injection.
+ * Classes decorated with @Injectable() can be registered in the container
+ * and have their dependencies automatically resolved.
+ *
+ * @param options - Optional configuration for the injectable
+ * @returns A class decorator
+ *
+ * @example
+ * // Simple usage
+ * &#64;Injectable()
+ * class MyService {
+ *   constructor(private dep: OtherService) {}
+ * }
+ *
+ * @example
+ * // With metadata
+ * &#64;Injectable({ metadata: { role: 'service', layer: 'data' } })
+ * class DatabaseService {
+ *   // ...
+ * }
+ *
+ * @example
+ * // With scope (for future features)
+ * &#64;Injectable({ scope: 'singleton' })
+ * class ConfigService {
+ *   // ...
+ * }
  */
 export function Injectable(options?: InjectableOptions): ClassDecorator {
 	return (target: object) => {
@@ -177,7 +354,36 @@ export function Injectable(options?: InjectableOptions): ClassDecorator {
 	}
 }
 
-// Inject decorator for specifying tokens
+/**
+ * Inject parameter decorator
+ *
+ * Specifies which token to use for injecting a dependency.
+ * Use this when you need to inject a value by token instead of by type.
+ *
+ * @param token - The injection token to use for this parameter
+ * @returns A parameter decorator
+ *
+ * @example
+ * // Inject by string token
+ * class MyService {
+ *   constructor(@Inject('CONFIG') private config: Config) {}
+ * }
+ *
+ * @example
+ * // Inject by symbol token
+ * const LOGGER = Symbol('Logger')
+ * class MyService {
+ *   constructor(@Inject(LOGGER) private logger: Logger) {}
+ * }
+ *
+ * @example
+ * // Inject with lazy reference (old style)
+ * class ServiceA {
+ *   constructor(
+ *     @Inject(lazy(() => ServiceB)) private serviceB: LazyRef<ServiceB>
+ *   ) {}
+ * }
+ */
 export function Inject(
 	token: InjectionToken | LazyRefMarker,
 ): ParameterDecorator {
@@ -194,8 +400,20 @@ export function Inject(
 
 /**
  * Get injectable metadata from a class
+ *
+ * Retrieves the metadata stored by the @Injectable() decorator.
+ * Useful for inspecting or utilizing the metadata at runtime.
+ *
  * @param target - The class to get metadata from
  * @returns The injectable options or undefined if not decorated with @Injectable
+ *
+ * @example
+ * &#64;Injectable({ metadata: { role: 'service' } })
+ * class MyService {}
+ *
+ * const metadata = getInjectableMetadata(MyService)
+ * console.log(metadata?.scope) // 'singleton'
+ * console.log(metadata?.metadata) // { role: 'service' }
  */
 export function getInjectableMetadata(
 	target: Constructor<unknown>,
@@ -207,6 +425,32 @@ export function getInjectableMetadata(
 // Container with Injection Tokens
 // ============================================================================
 
+/**
+ * Dependency Injection Container
+ *
+ * The Container manages dependency registration, resolution, and lifecycle.
+ * It supports multiple provider types (class, value, factory), automatic dependency
+ * resolution, circular dependency detection, lazy injection, and more.
+ *
+ * The container is a singleton - use `Container.createOrGet()` to access it.
+ *
+ * @example
+ * // Get the container instance
+ * const container = Container.createOrGet()
+ *
+ * @example
+ * // Register and resolve services
+ * container.register(MyService)
+ * const instance = await container.resolve(MyService)
+ *
+ * @example
+ * // Bootstrap with multiple providers
+ * await container.bootstrap([
+ *   ServiceA,
+ *   ServiceB,
+ *   { provide: 'CONFIG', useValue: config }
+ * ])
+ */
 export class Container {
 	private static instance: Container
 
@@ -235,6 +479,14 @@ export class Container {
 
 	private constructor() {}
 
+	/**
+	 * Get or create the singleton container instance
+	 *
+	 * @returns The singleton container instance
+	 *
+	 * @example
+	 * const container = Container.createOrGet()
+	 */
 	public static createOrGet(): Container {
 		if (!Container.instance) {
 			Container.instance = new Container()
@@ -243,14 +495,23 @@ export class Container {
 	}
 
 	/**
+	 * Get or create the singleton container instance
+	 *
 	 * @deprecated Use createOrGet() instead
+	 * @returns The singleton container instance
 	 */
 	public static getContainer(): Container {
 		return Container.createOrGet()
 	}
 
 	/**
-	 * Clear all providers and instances (useful for testing)
+	 * Clear all providers and instances
+	 *
+	 * Removes all registered providers and cached instances.
+	 * Useful for testing or resetting the container state.
+	 *
+	 * @example
+	 * container.clear()
 	 */
 	public clear(): void {
 		this.providers.clear()
@@ -261,6 +522,11 @@ export class Container {
 
 	/**
 	 * Get the key for a provider
+	 *
+	 * @private
+	 * @template T - The provider type
+	 * @param provider - The provider to get the key from
+	 * @returns The injection token or constructor used as the key
 	 */
 	private getProviderKey<T = unknown>(
 		provider: Provider<T>,
@@ -278,6 +544,28 @@ export class Container {
 
 	/**
 	 * Register a provider with the container
+	 *
+	 * Stores the provider configuration for later resolution.
+	 * Value providers are cached immediately.
+	 *
+	 * @template T - The type of instance to provide
+	 * @param provider - The provider configuration
+	 *
+	 * @example
+	 * // Register a class
+	 * container.register(MyService)
+	 *
+	 * @example
+	 * // Register with token
+	 * container.register({ provide: 'CONFIG', useValue: config })
+	 *
+	 * @example
+	 * // Register with factory
+	 * container.register({
+	 *   provide: 'DB',
+	 *   useFactory: (config) => new Database(config),
+	 *   deps: ['CONFIG']
+	 * })
 	 */
 	public register<T = unknown>(provider: Provider<T>): void {
 		const key = this.getProviderKey(provider)
@@ -298,8 +586,20 @@ export class Container {
 	}
 
 	/**
-	 * Get an already-resolved instance (synchronous)
-	 * Returns undefined if not yet resolved
+	 * Get an already-resolved instance synchronously
+	 *
+	 * Returns the cached instance if it has been resolved, otherwise returns undefined.
+	 * Use this when you're not sure if an instance has been resolved yet.
+	 *
+	 * @template T - The type of instance to get
+	 * @param token - The injection token or class constructor
+	 * @returns The resolved instance or undefined if not yet resolved
+	 *
+	 * @example
+	 * const instance = container.getInstance(MyService)
+	 * if (instance) {
+	 *   instance.doSomething()
+	 * }
 	 */
 	public getInstance<T = unknown>(
 		token: InjectionToken<T> | Constructor<T>,
@@ -308,8 +608,19 @@ export class Container {
 	}
 
 	/**
-	 * Get an already-resolved instance (synchronous)
-	 * Throws if not yet resolved
+	 * Get an already-resolved instance synchronously
+	 *
+	 * Returns the cached instance if it has been resolved, throws an error otherwise.
+	 * Use this when you expect the instance to already be resolved.
+	 *
+	 * @template T - The type of instance to get
+	 * @param token - The injection token or class constructor
+	 * @returns The resolved instance
+	 * @throws {Error} If the instance has not been resolved yet
+	 *
+	 * @example
+	 * const instance = container.getInstanceOrThrow(MyService)
+	 * instance.doSomething()
 	 */
 	public getInstanceOrThrow<T = unknown>(
 		token: InjectionToken<T> | Constructor<T>,
@@ -322,6 +633,14 @@ export class Container {
 
 	/**
 	 * Get the instances map (for advanced usage)
+	 *
+	 * Returns a read-only view of all resolved instances in the container.
+	 *
+	 * @returns Read-only map of all cached instances
+	 *
+	 * @example
+	 * const instances = container.getInstancesMap()
+	 * console.log(`Resolved ${instances.size} instances`)
 	 */
 	public getInstancesMap(): ReadonlyMap<
 		InjectionToken | Constructor<unknown>,
@@ -332,6 +651,14 @@ export class Container {
 
 	/**
 	 * Get the providers map (for advanced usage)
+	 *
+	 * Returns a read-only view of all registered providers in the container.
+	 *
+	 * @returns Read-only map of all registered providers
+	 *
+	 * @example
+	 * const providers = container.getProvidersMap()
+	 * console.log(`Registered ${providers.size} providers`)
 	 */
 	public getProvidersMap(): ReadonlyMap<
 		InjectionToken | Constructor<unknown>,
@@ -342,6 +669,22 @@ export class Container {
 
 	/**
 	 * Resolve a dependency by token or class
+	 *
+	 * Resolves the dependency and all its transitive dependencies.
+	 * The result is cached for subsequent calls.
+	 * Detects circular dependencies and throws an error if found.
+	 *
+	 * @template T - The type of instance to resolve
+	 * @param token - The injection token or class constructor to resolve
+	 * @param skipCircularCheck - Internal flag to skip circular dependency detection
+	 * @returns A promise that resolves to the instance
+	 * @throws {Error} If circular dependency is detected or provider is not found
+	 *
+	 * @example
+	 * const service = await container.resolve(MyService)
+	 *
+	 * @example
+	 * const config = await container.resolve('CONFIG')
 	 */
 	public resolve<T = unknown>(
 		ctor: Constructor<T>,
@@ -425,6 +768,11 @@ export class Container {
 
 	/**
 	 * Instantiate a class by resolving its dependencies
+	 *
+	 * @private
+	 * @template T - The type of instance to create
+	 * @param target - The class constructor to instantiate
+	 * @returns A promise that resolves to the new instance
 	 */
 	private async instantiateClass<T = unknown>(
 		target: Constructor<T>,
@@ -488,6 +836,11 @@ export class Container {
 
 	/**
 	 * Instantiate using a factory function
+	 *
+	 * @private
+	 * @template T - The type of instance to create
+	 * @param provider - The factory provider configuration
+	 * @returns A promise that resolves to the new instance
 	 */
 	private async instantiateFactory<T>(
 		provider: FactoryProvider<T>,
@@ -510,7 +863,17 @@ export class Container {
 
 	/**
 	 * Calculate the dependency weight for a token
-	 * Weight = depth of dependency tree (higher = more dependencies)
+	 *
+	 * Weight represents the depth of the dependency tree.
+	 * Higher weight = more dependencies = should be resolved later.
+	 * Value providers and services with no dependencies have weight 0.
+	 *
+	 * @param token - The injection token or class to calculate weight for
+	 * @returns The dependency weight (0 or higher)
+	 *
+	 * @example
+	 * const weight = container.calculateWeight(MyService)
+	 * console.log(`MyService has weight ${weight}`)
 	 */
 	// biome-ignore lint/suspicious/noExplicitAny: Token can be constructor of any type
 	public calculateWeight(token: InjectionToken | Constructor<any>): number {
@@ -537,6 +900,11 @@ export class Container {
 
 	/**
 	 * Recursive helper for weight calculation
+	 *
+	 * @private
+	 * @param token - The token to calculate weight for
+	 * @param visited - Set of already visited tokens (to detect cycles)
+	 * @returns The calculated weight
 	 */
 	private calculateWeightRecursive(
 		// biome-ignore lint/suspicious/noExplicitAny: Constructor can be of any type
@@ -594,6 +962,10 @@ export class Container {
 
 	/**
 	 * Get dependencies for a class constructor
+	 *
+	 * @private
+	 * @param target - The class constructor to analyze
+	 * @returns Array of dependency tokens
 	 */
 	private getClassDependencies(
 		// biome-ignore lint/suspicious/noExplicitAny: Constructor can be of any type
@@ -630,7 +1002,17 @@ export class Container {
 
 	/**
 	 * Get all providers sorted by weight (lowest first)
-	 * This gives you the optimal resolution order
+	 *
+	 * Returns providers in optimal resolution order.
+	 * Services with fewer dependencies (lower weight) come first.
+	 *
+	 * @returns Array of providers with their weights, sorted by weight ascending
+	 *
+	 * @example
+	 * const sorted = container.getProvidersByWeight()
+	 * sorted.forEach(({ token, weight }) => {
+	 *   console.log(`${token}: weight ${weight}`)
+	 * })
 	 */
 	public getProvidersByWeight(): Array<{
 		// biome-ignore lint/suspicious/noExplicitAny: Token can be constructor of any type
@@ -656,8 +1038,16 @@ export class Container {
 
 	/**
 	 * Resolve all providers in optimal order (by weight)
-	 * Lazy-referenced services are resolved last (lower priority)
-	 * Useful for bulk initialization/bootstrapping
+	 *
+	 * Resolves all registered providers, starting with those that have fewer dependencies.
+	 * Lazy-referenced services are resolved last (lower priority).
+	 * This is useful for bulk initialization/bootstrapping.
+	 *
+	 * @returns A promise that resolves to a map of all resolved instances
+	 *
+	 * @example
+	 * await container.resolveAll()
+	 * console.log('All services initialized!')
 	 */
 	public async resolveAll(): Promise<
 		// biome-ignore lint/suspicious/noExplicitAny: Can contain constructors and instances of any type
@@ -735,13 +1125,15 @@ export class Container {
 
 	/**
 	 * Bootstrap the container with a list of providers (NestJS-style)
-	 * This is a convenient way to register and resolve multiple providers at once
 	 *
-	 * @param providers - Array of providers (classes or provider objects)
+	 * This is a convenient way to register and resolve multiple providers at once.
+	 * All providers are registered first, then resolved in optimal order.
+	 *
+	 * @param providersOrConfig - Array of providers or config object with providers
 	 * @returns The container instance (for chaining)
 	 *
 	 * @example
-	 * // Simple usage
+	 * // Simple usage with array
 	 * await container.bootstrap([
 	 *   ServiceA,
 	 *   ServiceB,
@@ -749,8 +1141,8 @@ export class Container {
 	 * ])
 	 *
 	 * @example
-	 * // With configuration
-	 * const container = await Container.getContainer().bootstrap({
+	 * // With configuration object
+	 * await container.bootstrap({
 	 *   providers: [UserService, DatabaseService, AuthService]
 	 * })
 	 */
@@ -778,6 +1170,17 @@ export class Container {
 
 	/**
 	 * Get dependency graph for visualization/debugging
+	 *
+	 * Returns a map showing each provider's weight and its direct dependencies.
+	 * Useful for understanding the dependency structure or generating visualizations.
+	 *
+	 * @returns Map of service names to their dependency information
+	 *
+	 * @example
+	 * const graph = container.getDependencyGraph()
+	 * graph.forEach((info, name) => {
+	 *   console.log(`${name} (weight ${info.weight}):`, info.dependencies)
+	 * })
 	 */
 	public getDependencyGraph(): Map<
 		string,
@@ -811,25 +1214,59 @@ export class Container {
 		return graph
 	}
 
-	// Type guards
+	// ============================================================================
+	// Type Guards and Helper Methods
+	// ============================================================================
+
+	/**
+	 * Check if a provider is a class provider
+	 *
+	 * @private
+	 * @template T - The provider type
+	 * @param provider - The provider to check
+	 * @returns True if the provider is a ClassProvider
+	 */
 	private isClassProvider<T = unknown>(
 		provider: Provider<T>,
 	): provider is ClassProvider<T> {
 		return (provider as ClassProvider).useClass !== undefined
 	}
 
+	/**
+	 * Check if a provider is a value provider
+	 *
+	 * @private
+	 * @template T - The provider type
+	 * @param provider - The provider to check
+	 * @returns True if the provider is a ValueProvider
+	 */
 	private isValueProvider<T = unknown>(
 		provider: Provider<T>,
 	): provider is ValueProvider<T> {
 		return (provider as ValueProvider).useValue !== undefined
 	}
 
+	/**
+	 * Check if a provider is a factory provider
+	 *
+	 * @private
+	 * @template T - The provider type
+	 * @param provider - The provider to check
+	 * @returns True if the provider is a FactoryProvider
+	 */
 	private isFactoryProvider<T = unknown>(
 		provider: Provider<T>,
 	): provider is FactoryProvider<T> {
 		return (provider as FactoryProvider).useFactory !== undefined
 	}
 
+	/**
+	 * Get a human-readable name for a token
+	 *
+	 * @private
+	 * @param token - The injection token
+	 * @returns A string representation of the token
+	 */
 	// biome-ignore lint/suspicious/noExplicitAny: Token can be constructor of any type
 	private getTokenName(token: InjectionToken | Constructor<any>): string {
 		if (typeof token === 'function') {
