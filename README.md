@@ -1,4 +1,4 @@
-# ioc-n-di
+# @cryxto/ioc-n-di
 
 A lightweight, type-safe TypeScript IoC (Inversion of Control) container and dependency injection library with decorator support.
 
@@ -18,13 +18,13 @@ A lightweight, type-safe TypeScript IoC (Inversion of Control) container and dep
 ## Installation
 
 ```bash
-npm install ioc-n-di reflect-metadata
+npm install @cryxto/ioc-n-di reflect-metadata
 ```
 
 or with bun:
 
 ```bash
-bun add ioc-n-di reflect-metadata
+bun add @cryxto/ioc-n-di reflect-metadata
 ```
 
 **Important**: This library requires `reflect-metadata` as a peer dependency.
@@ -46,7 +46,7 @@ Add these settings to your `tsconfig.json`:
 
 ```typescript
 import 'reflect-metadata';
-import { Container, Injectable } from 'ioc-n-di';
+import { Container, Injectable } from '@cryxto/ioc-n-di';
 
 @Injectable()
 class Logger {
@@ -81,7 +81,7 @@ const user = userService.getUser(1);
 
 ```typescript
 import 'reflect-metadata';
-import { Container, Injectable } from 'ioc-n-di';
+import { Container, Injectable } from '@cryxto/ioc-n-di';
 
 @Injectable()
 class Database {
@@ -113,7 +113,7 @@ repo.findAll();
 Use tokens when you need to inject interfaces or specific implementations:
 
 ```typescript
-import { Container, Injectable, Inject } from 'ioc-n-di';
+import { Container, Injectable, Inject } from '@cryxto/ioc-n-di';
 
 // Define tokens
 const DATABASE_URL = Symbol('DATABASE_URL');
@@ -156,7 +156,7 @@ service.connect();
 Create instances using factory functions:
 
 ```typescript
-import { Container } from 'ioc-n-di';
+import { Container } from '@cryxto/ioc-n-di';
 
 const CONFIG_TOKEN = Symbol('CONFIG');
 const HTTP_CLIENT = Symbol('HTTP_CLIENT');
@@ -185,7 +185,7 @@ const httpClient = await container.resolve(HTTP_CLIENT);
 Handle circular dependencies using lazy references:
 
 ```typescript
-import { Container, Injectable, Lazy, LazyRef } from 'ioc-n-di';
+import { Container, Injectable, Lazy, LazyRef } from '@cryxto/ioc-n-di';
 
 @Injectable()
 class ServiceA {
@@ -223,7 +223,7 @@ serviceA.doSomething();
 Execute initialization logic after instantiation:
 
 ```typescript
-import { Container } from 'ioc-n-di';
+import { Container } from '@cryxto/ioc-n-di';
 
 class DatabaseConnection {
   isConnected = false;
@@ -252,7 +252,7 @@ console.log(db.isConnected); // true
 The easiest way to initialize your application - register and resolve all providers at once:
 
 ```typescript
-import { Container, Injectable } from 'ioc-n-di';
+import { Container, Injectable } from '@cryxto/ioc-n-di';
 
 @Injectable()
 class ConfigService {
@@ -302,7 +302,7 @@ await container.bootstrap({
 Store custom metadata with your services (useful for plugins, documentation, etc.):
 
 ```typescript
-import { Injectable, getInjectableMetadata } from 'ioc-n-di';
+import { Injectable, getInjectableMetadata } from '@cryxto/ioc-n-di';
 
 @Injectable({
   metadata: {
@@ -324,7 +324,7 @@ console.log(metadata?.scope);    // 'singleton'
 Manually resolve all registered providers in optimal order:
 
 ```typescript
-import { Container, Injectable } from 'ioc-n-di';
+import { Container, Injectable } from '@cryxto/ioc-n-di';
 
 @Injectable()
 class ConfigService {}
@@ -465,7 +465,7 @@ container.register({
 ### Testing
 
 ```typescript
-import { Container } from 'ioc-n-di';
+import { Container } from '@cryxto/ioc-n-di';
 
 describe('MyService', () => {
   let container: Container;
