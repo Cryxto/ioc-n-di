@@ -438,7 +438,8 @@ export interface GroupOptions {
 	 * Providers that belong to this group
 	 * Can include classes, providers, or other groups
 	 */
-	providers?: Provider[]
+	// biome-ignore lint/suspicious/noExplicitAny: Providers can be of any type
+	providers?: Array<Provider<any>>
 
 	/**
 	 * Dependencies for weight calculation
@@ -1276,8 +1277,9 @@ export class Container {
 	 *   AppService
 	 * ])
 	 */
+	// biome-ignore lint/suspicious/noExplicitAny: Providers can be of any type
 	public async bootstrap(
-		providersOrConfig: Provider[] | { providers: Provider[] },
+		providersOrConfig: Provider<any>[] | { providers: Provider<any>[] },
 	): Promise<this> {
 		console.log('\n🚀 Bootstrapping container...\n')
 
@@ -1365,11 +1367,14 @@ export class Container {
 	 * @param providers - Array of providers that may contain groups
 	 * @returns Flattened array of providers with groups expanded
 	 */
-	private flattenProviders(providers: Provider[]): Provider[] {
-		const result: Provider[] = []
+	// biome-ignore lint/suspicious/noExplicitAny: Providers can be of any type
+	private flattenProviders(providers: Provider<any>[]): Provider<any>[] {
+		// biome-ignore lint/suspicious/noExplicitAny: Providers can be of any type
+		const result: Provider<any>[] = []
 		const visited = new Set<Constructor<unknown>>()
 
-		const flatten = (items: Provider[]) => {
+		// biome-ignore lint/suspicious/noExplicitAny: Providers can be of any type
+		const flatten = (items: Provider<any>[]) => {
 			for (const item of items) {
 				// Check if it's a group (plain constructor with @Group decorator)
 				if (typeof item === 'function' && isGroup(item)) {
