@@ -6,6 +6,7 @@ A lightweight, type-safe TypeScript IoC (Inversion of Control) container and dep
 
 - **Type-safe dependency injection** using TypeScript decorators
 - **Multiple provider types**: Class, Value, and Factory providers
+- **Provider grouping** with `@Group()` decorator for organizing related providers
 - **NestJS-style bootstrapping** for easy application initialization
 - **Injectable metadata** for storing custom service information
 - **Lazy injection** support for circular dependencies
@@ -361,6 +362,153 @@ await container.resolveAll();
 const app = container.getInstance(AppService);
 ```
 
+### Provider Groups
+
+Organize related providers into reusable modules using the `@Group()` decorator:
+
+```typescript
+import { Group, Injectable, Container } from '@cryxto/ioc-n-di';
+
+// Define your services
+@Injectable()
+class UserRepository {}
+
+@Injectable()
+class UserService {
+  constructor(private repo: UserRepository) {}
+}
+
+@Injectable()
+class UserController {
+  constructor(private service: UserService) {}
+}
+
+// Group them together
+@Group({
+  providers: [UserRepository, UserService, UserController]
+})
+class UserModule {}
+
+// Use in bootstrap - the group is automatically flattened
+await container.bootstrap([
+  UserModule,  // Expands to UserRepository, UserService, UserController
+  AppService
+]);
+```
+
+#### Groups with Non-Class Providers
+
+Groups can contain any provider type (classes, values, factories):
+
+```typescript
+import { MikroORM, EntityManager } from '@mikro-orm/core';
+
+// Factory provider for ORM
+const MikroORMProvider = {
+  provide: MikroORM,
+  useFactory: async (config) => await MikroORM.init(config),
+  deps: [ConfigService]
+};
+
+// Factory provider for EntityManager
+const EntityManagerProvider = {
+  provide: EntityManager,
+  useFactory: (orm: MikroORM) => orm.em,
+  deps: [MikroORM]
+};
+
+// Group any provider types together
+@Group({
+  providers: [
+    ConfigService,           // Class
+    MikroORMProvider,       // Factory provider
+    EntityManagerProvider   // Factory provider
+  ]
+})
+class DatabaseModule {}
+```
+
+#### Nested Groups
+
+Groups can contain other groups for hierarchical organization:
+
+```typescript
+@Group({
+  providers: [ConfigService, LoggerService]
+})
+class CoreModule {}
+
+@Group({
+  providers: [UserRepository, UserService]
+})
+class UserModule {}
+
+@Group({
+  providers: [CoreModule, UserModule, AppService]
+})
+class AppModule {}
+
+// All groups are recursively flattened
+await container.bootstrap([AppModule]);
+```
+
+#### Groups for Resolution Ordering
+
+Use groups in `deps` to control resolution order without injecting them:
+
+```typescript
+@Group({
+  providers: [
+    InvitationController,
+    UserController,
+    AuthController
+  ]
+})
+class ControllersModule {}
+
+// Barrier pattern - ensures all controllers resolve first
+const CONTROLLERS_READY = Symbol('CONTROLLERS_READY');
+container.register({
+  provide: CONTROLLERS_READY,
+  useValue: true,
+  deps: [ControllersModule]  // ControllersModule providers resolve first
+});
+
+// App waits for all controllers to be ready
+const AppProvider = {
+  provide: APP,
+  useFactory: async (apiServer) => createApp(apiServer),
+  deps: [API_SERVER, CONTROLLERS_READY]  // Correct ordering guaranteed
+};
+```
+
+#### Manual Weight Control
+
+Add explicit dependencies to control resolution order:
+
+```typescript
+// ClassProvider with explicit deps for weight calculation
+container.register({
+  provide: AppService,
+  useClass: AppService,
+  deps: [DatabaseModule, CacheModule]  // These resolve first, even if not injected
+});
+
+// FactoryProvider deps also affect weight
+container.register({
+  provide: API_SERVER,
+  useFactory: () => createServer(),
+  deps: [ControllersModule]  // All controllers resolve before server
+});
+
+// Groups in deps are automatically flattened
+@Group({
+  providers: [ServiceA, ServiceB],
+  deps: [ConfigService]  // Group itself can have dependencies
+})
+class FeatureModule {}
+```
+
 ## API Reference
 
 ### Container
@@ -387,10 +535,14 @@ The main DI container (singleton pattern).
   - Options: `{ scope?: 'singleton', metadata?: Record<string, unknown> }`
 - `@Inject(token)` - Specify injection token for a constructor parameter
 - `@Lazy(token)` - Inject a lazy reference to handle circular dependencies
+- `@Group(options)` - **New:** Group related providers together into a module
+  - Options: `{ providers?: Provider[], deps?: InjectionToken[] }`
 
 ### Utility Functions
 
 - `getInjectableMetadata(constructor)` - Retrieve metadata stored by `@Injectable()` decorator
+- `getGroupMetadata(constructor)` - **New:** Retrieve metadata stored by `@Group()` decorator
+- `isGroup(target)` - **New:** Check if a class is decorated with `@Group()`
 
 ### Provider Types
 
@@ -399,6 +551,7 @@ The main DI container (singleton pattern).
 {
   provide: InjectionToken,
   useClass: Constructor,
+  deps?: InjectionToken[],  // Optional: for weight calculation and ordering
   onInit?: (instance) => void | Promise<void>
 }
 
@@ -412,9 +565,16 @@ The main DI container (singleton pattern).
 {
   provide: InjectionToken,
   useFactory: (...args) => any,
-  deps?: InjectionToken[],
+  deps?: InjectionToken[],  // Dependencies injected into factory + affects weight
   onInit?: (instance) => void | Promise<void>
 }
+
+// Group (created with @Group decorator)
+@Group({
+  providers?: Provider[],    // Providers to group together
+  deps?: InjectionToken[]   // Dependencies for weight calculation
+})
+class ModuleName {}
 
 // Or just a plain Constructor
 Constructor
