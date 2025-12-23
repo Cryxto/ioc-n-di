@@ -32,6 +32,7 @@ export type InjectionToken<T = unknown> = string | symbol | Constructor<T>
  * {
  *   provide: 'MyService',
  *   useClass: MyServiceImpl,
+ *   deps: [ConfigService], // Optional: for weight calculation
  *   onInit: async (instance) => await instance.initialize()
  * }
  */
@@ -40,6 +41,9 @@ export interface ClassProvider<T = unknown> {
 	provide: InjectionToken<T>
 	/** Class constructor to instantiate */
 	useClass: Constructor<T>
+	/** Optional dependencies (affects resolution order/weight) */
+	// biome-ignore lint/suspicious/noExplicitAny: Dependencies can be of any type
+	deps?: (InjectionToken | Constructor<any>)[]
 	/** Optional lifecycle hook called after instantiation */
 	onInit?: (instance: T) => Promise<void> | void
 }
@@ -419,6 +423,119 @@ export function getInjectableMetadata(
 	target: Constructor<unknown>,
 ): InjectableOptions | undefined {
 	return Reflect.getMetadata('injectable:options', target)
+}
+
+// ============================================================================
+// Group Decorator (for grouping providers)
+// ============================================================================
+
+/**
+ * Options for @Group decorator
+ * Used to group related providers together
+ */
+export interface GroupOptions {
+	/**
+	 * Providers that belong to this group
+	 * Can include classes, providers, or other groups
+	 */
+	providers?: Provider[]
+
+	/**
+	 * Dependencies for weight calculation
+	 * These affect resolution order even if not directly used
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: Dependencies can be of any type
+	deps?: (InjectionToken | Constructor<any>)[]
+
+	/**
+	 * Additional options (for future extensibility)
+	 */
+	[key: string]: unknown
+}
+
+/**
+ * Group class decorator
+ *
+ * Marks a class as a provider group. Groups allow you to organize related
+ * providers together and can be used in deps arrays or bootstrap.
+ * Groups are flattened during resolution.
+ *
+ * @param options - Configuration for the group
+ * @returns A class decorator
+ *
+ * @example
+ * // Create a group of auth-related services
+ * &#64;Group({
+ *   providers: [AuthService, TokenService, UserService]
+ * })
+ * class AuthModule {}
+ *
+ * @example
+ * // Use group in deps
+ * container.register({
+ *   provide: AppService,
+ *   useFactory: () => new AppService(),
+ *   deps: [AuthModule, ConfigService] // AuthModule gets flattened
+ * })
+ *
+ * @example
+ * // Bootstrap with groups
+ * await container.bootstrap([
+ *   ConfigModule,
+ *   AuthModule,
+ *   AppService
+ * ])
+ */
+export function Group(options: GroupOptions = {}): ClassDecorator {
+	return (target: object) => {
+		// Store group metadata
+		const metadata = {
+			providers: [],
+			deps: [],
+			...options,
+		}
+		Reflect.defineMetadata('group:options', metadata, target)
+	}
+}
+
+/**
+ * Get group metadata from a class
+ *
+ * Retrieves the metadata stored by the @Group() decorator.
+ *
+ * @param target - The class to get metadata from
+ * @returns The group options or undefined if not decorated with @Group
+ *
+ * @example
+ * &#64;Group({ providers: [ServiceA, ServiceB] })
+ * class MyModule {}
+ *
+ * const metadata = getGroupMetadata(MyModule)
+ * console.log(metadata?.providers) // [ServiceA, ServiceB]
+ */
+export function getGroupMetadata(
+	// biome-ignore lint/suspicious/noExplicitAny: Constructor can be of any type
+	target: Constructor<any>,
+): GroupOptions | undefined {
+	return Reflect.getMetadata('group:options', target)
+}
+
+/**
+ * Check if a constructor is decorated with @Group
+ *
+ * @param target - The constructor to check
+ * @returns True if the constructor has @Group decorator
+ *
+ * @example
+ * if (isGroup(MyModule)) {
+ *   console.log('MyModule is a group')
+ * }
+ */
+// biome-ignore lint/suspicious/noExplicitAny: Constructor can be of any type
+export function isGroup(target: any): target is Constructor<any> {
+	return (
+		typeof target === 'function' && Reflect.hasMetadata('group:options', target)
+	)
 }
 
 // ============================================================================
@@ -934,11 +1051,15 @@ export class Container {
 
 		// Get dependencies based on provider type
 		if (this.isFactoryProvider(provider)) {
-			// Factory provider: use explicit deps
-			deps = provider.deps || []
+			// Factory provider: use explicit deps (flatten groups)
+			deps = provider.deps ? this.flattenDeps(provider.deps) : []
 		} else if (this.isClassProvider(provider)) {
-			// Class provider: get constructor dependencies
-			deps = this.getClassDependencies(provider.useClass)
+			// Class provider: merge explicit deps with constructor dependencies
+			const explicitDeps = provider.deps ? this.flattenDeps(provider.deps) : []
+			const constructorDeps = this.getClassDependencies(provider.useClass)
+			// Combine both, using Set to avoid duplicates
+			const allDeps = [...new Set([...explicitDeps, ...constructorDeps])]
+			deps = allDeps
 		} else {
 			// Plain constructor
 			// biome-ignore lint/suspicious/noExplicitAny: Provider is a constructor of any type
@@ -1128,6 +1249,7 @@ export class Container {
 	 *
 	 * This is a convenient way to register and resolve multiple providers at once.
 	 * All providers are registered first, then resolved in optimal order.
+	 * Groups are automatically flattened during registration.
 	 *
 	 * @param providersOrConfig - Array of providers or config object with providers
 	 * @returns The container instance (for chaining)
@@ -1145,6 +1267,14 @@ export class Container {
 	 * await container.bootstrap({
 	 *   providers: [UserService, DatabaseService, AuthService]
 	 * })
+	 *
+	 * @example
+	 * // With groups
+	 * await container.bootstrap([
+	 *   ConfigModule,  // Group gets flattened
+	 *   AuthModule,    // Group gets flattened
+	 *   AppService
+	 * ])
 	 */
 	public async bootstrap(
 		providersOrConfig: Provider[] | { providers: Provider[] },
@@ -1156,8 +1286,15 @@ export class Container {
 			? providersOrConfig
 			: providersOrConfig.providers
 
+		// Flatten groups in the providers array
+		console.log('Flattening groups...')
+		const flattenedProviders = this.flattenProviders(providers)
+		console.log(
+			`Flattened ${providers.length} items into ${flattenedProviders.length} providers\n`,
+		)
+
 		// Register all providers
-		for (const provider of providers) {
+		for (const provider of flattenedProviders) {
 			this.register(provider)
 		}
 
@@ -1217,6 +1354,106 @@ export class Container {
 	// ============================================================================
 	// Type Guards and Helper Methods
 	// ============================================================================
+
+	/**
+	 * Flatten groups in a providers array
+	 *
+	 * Recursively expands any groups found in the providers array.
+	 * Groups are expanded to their constituent providers.
+	 *
+	 * @private
+	 * @param providers - Array of providers that may contain groups
+	 * @returns Flattened array of providers with groups expanded
+	 */
+	private flattenProviders(providers: Provider[]): Provider[] {
+		const result: Provider[] = []
+		const visited = new Set<Constructor<unknown>>()
+
+		const flatten = (items: Provider[]) => {
+			for (const item of items) {
+				// Check if it's a group (plain constructor with @Group decorator)
+				if (typeof item === 'function' && isGroup(item)) {
+					// Prevent infinite recursion
+					if (visited.has(item)) {
+						continue
+					}
+					visited.add(item)
+
+					const groupMeta = getGroupMetadata(item)
+					if (groupMeta?.providers && groupMeta.providers.length > 0) {
+						// Recursively flatten nested groups
+						flatten(groupMeta.providers)
+					}
+				} else {
+					// Regular provider, add it
+					result.push(item)
+				}
+			}
+		}
+
+		flatten(providers)
+		return result
+	}
+
+	/**
+	 * Flatten groups in a deps array
+	 *
+	 * Expands any groups found in the deps array to their constituent providers.
+	 * Also includes the group's own deps for weight calculation.
+	 *
+	 * @private
+	 * @param deps - Array of dependencies that may contain groups
+	 * @returns Flattened array of dependencies with groups expanded
+	 */
+	private flattenDeps(
+		// biome-ignore lint/suspicious/noExplicitAny: Dependencies can be of any type
+		deps: (InjectionToken | Constructor<any>)[],
+		// biome-ignore lint/suspicious/noExplicitAny: Dependencies can be of any type
+	): (InjectionToken | Constructor<any>)[] {
+		// biome-ignore lint/suspicious/noExplicitAny: Dependencies can be of any type
+		const result: (InjectionToken | Constructor<any>)[] = []
+		const visited = new Set<Constructor<unknown>>()
+
+		// biome-ignore lint/suspicious/noExplicitAny: Dependencies can be of any type
+		const flatten = (items: (InjectionToken | Constructor<any>)[]) => {
+			for (const item of items) {
+				// Check if it's a group
+				if (typeof item === 'function' && isGroup(item)) {
+					// Prevent infinite recursion
+					if (visited.has(item)) {
+						continue
+					}
+					visited.add(item)
+
+					const groupMeta = getGroupMetadata(item)
+					if (groupMeta) {
+						// Add the group's deps first (for weight calculation)
+						if (groupMeta.deps && groupMeta.deps.length > 0) {
+							flatten(groupMeta.deps)
+						}
+
+						// Then flatten the group's providers
+						if (groupMeta.providers && groupMeta.providers.length > 0) {
+							const flattenedProviders = this.flattenProviders(
+								groupMeta.providers,
+							)
+							// Extract tokens from providers
+							for (const provider of flattenedProviders) {
+								const token = this.getProviderKey(provider)
+								result.push(token)
+							}
+						}
+					}
+				} else {
+					// Regular dependency, add it
+					result.push(item)
+				}
+			}
+		}
+
+		flatten(deps)
+		return result
+	}
 
 	/**
 	 * Check if a provider is a class provider

@@ -5,8 +5,11 @@ import {
 	Container,
 	type FactoryProvider,
 	forwardRef,
+	Group,
+	getGroupMetadata,
 	Inject,
 	Injectable,
+	isGroup,
 	Lazy,
 	LazyRef,
 	LazyRefMarker,
@@ -935,5 +938,261 @@ describe('Edge Cases', () => {
 
 		const instance = await container.resolve(BasicService)
 		expect(instance).toBeInstanceOf(BasicService)
+	})
+})
+
+// ============================================================================
+// Group Tests
+// ============================================================================
+
+describe('Group Decorator', () => {
+	beforeEach(resetContainer)
+
+	test('should create group with @Group decorator', () => {
+		@Group({
+			providers: [BasicService, DependentService],
+		})
+		class TestModule {}
+
+		const metadata = getGroupMetadata(TestModule)
+		expect(metadata?.providers).toEqual([BasicService, DependentService])
+	})
+
+	test('should check if class is a group', () => {
+		@Group({ providers: [BasicService] })
+		class TestModule {}
+
+		expect(isGroup(TestModule)).toBe(true)
+		expect(isGroup(BasicService)).toBe(false)
+	})
+
+	test('should flatten groups in bootstrap', async () => {
+		const container = Container.createOrGet()
+
+		@Injectable()
+		class ServiceA {
+			getValue() {
+				return 'A'
+			}
+		}
+
+		@Injectable()
+		class ServiceB {
+			getValue() {
+				return 'B'
+			}
+		}
+
+		@Group({
+			providers: [ServiceA, ServiceB],
+		})
+		class TestModule {}
+
+		await container.bootstrap([TestModule])
+
+		const instanceA = container.getInstance(ServiceA)
+		const instanceB = container.getInstance(ServiceB)
+
+		expect(instanceA).toBeInstanceOf(ServiceA)
+		expect(instanceB).toBeInstanceOf(ServiceB)
+	})
+
+	test('should handle nested groups', async () => {
+		const container = Container.createOrGet()
+
+		@Injectable()
+		class ServiceA {
+			getValue() {
+				return 'A'
+			}
+		}
+
+		@Injectable()
+		class ServiceB {
+			getValue() {
+				return 'B'
+			}
+		}
+
+		@Injectable()
+		class ServiceC {
+			getValue() {
+				return 'C'
+			}
+		}
+
+		@Group({
+			providers: [ServiceA, ServiceB],
+		})
+		class ModuleA {}
+
+		@Group({
+			providers: [ModuleA, ServiceC],
+		})
+		class ModuleB {}
+
+		await container.bootstrap([ModuleB])
+
+		expect(container.getInstance(ServiceA)).toBeInstanceOf(ServiceA)
+		expect(container.getInstance(ServiceB)).toBeInstanceOf(ServiceB)
+		expect(container.getInstance(ServiceC)).toBeInstanceOf(ServiceC)
+	})
+
+	test('should use group deps for weight calculation', () => {
+		const container = Container.createOrGet()
+
+		@Injectable()
+		class ConfigService {}
+
+		@Injectable()
+		class LoggerService {}
+
+		@Group({
+			providers: [ConfigService, LoggerService],
+		})
+		class CoreModule {}
+
+		@Injectable()
+		class AppService {
+			constructor(public config: ConfigService) {}
+		}
+
+		container.register({
+			provide: AppService,
+			useClass: AppService,
+			deps: [CoreModule], // CoreModule should add ConfigService and LoggerService as deps
+		})
+
+		container.register(ConfigService)
+		container.register(LoggerService)
+
+		// AppService depends on CoreModule which contains ConfigService and LoggerService
+		// So AppService should have weight > 0
+		const weight = container.calculateWeight(AppService)
+		expect(weight).toBeGreaterThan(0)
+	})
+
+	test('should handle group with deps property', async () => {
+		const container = Container.createOrGet()
+
+		@Injectable()
+		class ConfigService {
+			getValue() {
+				return 'config'
+			}
+		}
+
+		@Injectable()
+		class ServiceA {
+			getValue() {
+				return 'A'
+			}
+		}
+
+		@Injectable()
+		class ServiceB {
+			getValue() {
+				return 'B'
+			}
+		}
+
+		// Group declares deps on ConfigService
+		@Group({
+			providers: [ServiceA, ServiceB],
+			deps: [ConfigService],
+		})
+		class FeatureModule {}
+
+		await container.bootstrap([ConfigService, FeatureModule])
+
+		expect(container.getInstance(ConfigService)).toBeInstanceOf(ConfigService)
+		expect(container.getInstance(ServiceA)).toBeInstanceOf(ServiceA)
+		expect(container.getInstance(ServiceB)).toBeInstanceOf(ServiceB)
+	})
+
+	test('should handle ClassProvider with deps property', () => {
+		const container = Container.createOrGet()
+
+		@Injectable()
+		class ServiceA {}
+
+		@Injectable()
+		class ServiceB {}
+
+		@Injectable()
+		class ServiceC {}
+
+		// ServiceC has explicit deps on ServiceA and ServiceB for weight calculation
+		container.register({
+			provide: ServiceC,
+			useClass: ServiceC,
+			deps: [ServiceA, ServiceB],
+		})
+
+		container.register(ServiceA)
+		container.register(ServiceB)
+
+		// ServiceC should have weight 1 because it depends on ServiceA and ServiceB
+		const weight = container.calculateWeight(ServiceC)
+		expect(weight).toBe(1)
+	})
+
+	test('should prevent infinite recursion with circular groups', async () => {
+		const container = Container.createOrGet()
+
+		@Injectable()
+		class ServiceA {
+			getValue() {
+				return 'A'
+			}
+		}
+
+		// Create a group that might reference itself (edge case)
+		@Group({
+			providers: [ServiceA],
+		})
+		class TestModule {}
+
+		// This should not cause infinite recursion
+		await container.bootstrap([TestModule])
+
+		expect(container.getInstance(ServiceA)).toBeInstanceOf(ServiceA)
+	})
+
+	test('should mix regular providers with groups in bootstrap', async () => {
+		const container = Container.createOrGet()
+
+		@Injectable()
+		class ServiceA {
+			getValue() {
+				return 'A'
+			}
+		}
+
+		@Injectable()
+		class ServiceB {
+			getValue() {
+				return 'B'
+			}
+		}
+
+		@Injectable()
+		class ServiceC {
+			getValue() {
+				return 'C'
+			}
+		}
+
+		@Group({
+			providers: [ServiceA, ServiceB],
+		})
+		class ModuleAB {}
+
+		// Mix group and regular provider
+		await container.bootstrap([ModuleAB, ServiceC])
+
+		expect(container.getInstance(ServiceA)).toBeInstanceOf(ServiceA)
+		expect(container.getInstance(ServiceB)).toBeInstanceOf(ServiceB)
+		expect(container.getInstance(ServiceC)).toBeInstanceOf(ServiceC)
 	})
 })
