@@ -61,5 +61,15 @@
 	"simple-git-hooks": {
 		"pre-commit": "bun run lint && bun run type-check"
 	},
-	"types": "./dist/index.d.ts"
+	"types": "./dist/index.d.ts",
+	"keywords": [
+		"dependency injection",
+		"inversion of control",
+		"ioc container",
+		"ioc",
+		"dependency",
+		"inversion",
+		"injection",
+		"container"
+	]
 }
