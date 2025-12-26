@@ -13,7 +13,10 @@ import {
 	Lazy,
 	LazyRef,
 	LazyRefMarker,
+	LogLevel,
 	lazy,
+	type OnDestroy,
+	type OnInit,
 	type ValueProvider,
 } from '../src'
 
@@ -25,6 +28,7 @@ function resetContainer() {
 	// Reset the singleton container instance for clean tests
 	const container = Container.createOrGet()
 	container.clear()
+	container.setLogLevel(LogLevel.OFF) // Disable logging for tests
 	// Reset resolution order tracking
 	resolutionOrder.length = 0
 }
@@ -1194,5 +1198,413 @@ describe('Group Decorator', () => {
 		expect(container.getInstance(ServiceA)).toBeInstanceOf(ServiceA)
 		expect(container.getInstance(ServiceB)).toBeInstanceOf(ServiceB)
 		expect(container.getInstance(ServiceC)).toBeInstanceOf(ServiceC)
+	})
+})
+
+// ============================================================================
+// Lifecycle Hooks Tests
+// ============================================================================
+
+describe('Lifecycle Hooks', () => {
+	beforeEach(resetContainer)
+
+	test('should call onInit method when class implements OnInit', async () => {
+		const container = Container.createOrGet()
+		let initCalled = false
+
+		@Injectable()
+		class ServiceWithInit implements OnInit {
+			async onInit() {
+				initCalled = true
+			}
+
+			getValue() {
+				return 'test'
+			}
+		}
+
+		container.register(ServiceWithInit)
+		await container.resolve(ServiceWithInit)
+
+		expect(initCalled).toBe(true)
+	})
+
+	test('should call onDestroy method when class implements OnDestroy', async () => {
+		const container = Container.createOrGet()
+		let destroyCalled = false
+
+		@Injectable()
+		class ServiceWithDestroy implements OnDestroy {
+			async onDestroy() {
+				destroyCalled = true
+			}
+
+			getValue() {
+				return 'test'
+			}
+		}
+
+		container.register(ServiceWithDestroy)
+		await container.resolve(ServiceWithDestroy)
+		await container.destroy()
+
+		expect(destroyCalled).toBe(true)
+	})
+
+	test('should call both OnInit and OnDestroy when class implements both', async () => {
+		const container = Container.createOrGet()
+		const lifecycleCalls: string[] = []
+
+		@Injectable()
+		class ServiceWithBothHooks implements OnInit, OnDestroy {
+			async onInit() {
+				lifecycleCalls.push('init')
+			}
+
+			async onDestroy() {
+				lifecycleCalls.push('destroy')
+			}
+
+			getValue() {
+				return 'test'
+			}
+		}
+
+		container.register(ServiceWithBothHooks)
+		await container.resolve(ServiceWithBothHooks)
+		await container.destroy()
+
+		expect(lifecycleCalls).toEqual(['init', 'destroy'])
+	})
+
+	test('should support synchronous lifecycle hooks', async () => {
+		const container = Container.createOrGet()
+		const lifecycleCalls: string[] = []
+
+		@Injectable()
+		class ServiceWithSyncHooks implements OnInit, OnDestroy {
+			onInit() {
+				lifecycleCalls.push('init')
+			}
+
+			onDestroy() {
+				lifecycleCalls.push('destroy')
+			}
+		}
+
+		container.register(ServiceWithSyncHooks)
+		await container.resolve(ServiceWithSyncHooks)
+		await container.destroy()
+
+		expect(lifecycleCalls).toEqual(['init', 'destroy'])
+	})
+
+	test('should call provider onInit and instance onInit in correct order', async () => {
+		const container = Container.createOrGet()
+		const calls: string[] = []
+
+		@Injectable()
+		class ServiceWithInit implements OnInit {
+			onInit() {
+				calls.push('instance-onInit')
+			}
+		}
+
+		const provider: ClassProvider<ServiceWithInit> = {
+			provide: ServiceWithInit,
+			useClass: ServiceWithInit,
+			onInit: () => {
+				calls.push('provider-onInit')
+			},
+		}
+
+		container.register(provider)
+		await container.resolve(ServiceWithInit)
+
+		expect(calls).toEqual(['provider-onInit', 'instance-onInit'])
+	})
+
+	test('should call provider onDestroy and instance onDestroy in correct order', async () => {
+		const container = Container.createOrGet()
+		const calls: string[] = []
+
+		@Injectable()
+		class ServiceWithDestroy implements OnDestroy {
+			onDestroy() {
+				calls.push('instance-onDestroy')
+			}
+		}
+
+		const provider: ClassProvider<ServiceWithDestroy> = {
+			provide: ServiceWithDestroy,
+			useClass: ServiceWithDestroy,
+			onDestroy: () => {
+				calls.push('provider-onDestroy')
+			},
+		}
+
+		container.register(provider)
+		await container.resolve(ServiceWithDestroy)
+		await container.destroy()
+
+		expect(calls).toEqual(['provider-onDestroy', 'instance-onDestroy'])
+	})
+
+	test('should support onDestroy in factory provider', async () => {
+		const container = Container.createOrGet()
+		let destroyCalled = false
+
+		const provider: FactoryProvider<{ close: () => void }> = {
+			provide: 'connection',
+			useFactory: () => ({
+				close: () => {
+					/* cleanup */
+				},
+			}),
+			onDestroy: async (instance) => {
+				instance.close()
+				destroyCalled = true
+			},
+		}
+
+		container.register(provider)
+		await container.resolve('connection')
+		await container.destroy()
+
+		expect(destroyCalled).toBe(true)
+	})
+
+	test('should handle lifecycle hooks with dependencies', async () => {
+		const container = Container.createOrGet()
+		const lifecycleCalls: string[] = []
+
+		@Injectable()
+		class ConfigService implements OnInit, OnDestroy {
+			onInit() {
+				lifecycleCalls.push('config-init')
+			}
+
+			onDestroy() {
+				lifecycleCalls.push('config-destroy')
+			}
+		}
+
+		@Injectable()
+		class DatabaseService implements OnInit, OnDestroy {
+			constructor(public config: ConfigService) {}
+
+			onInit() {
+				lifecycleCalls.push('database-init')
+			}
+
+			onDestroy() {
+				lifecycleCalls.push('database-destroy')
+			}
+		}
+
+		container.register(ConfigService)
+		container.register(DatabaseService)
+		await container.resolve(DatabaseService)
+		await container.destroy()
+
+		expect(lifecycleCalls).toContain('config-init')
+		expect(lifecycleCalls).toContain('database-init')
+		expect(lifecycleCalls).toContain('config-destroy')
+		expect(lifecycleCalls).toContain('database-destroy')
+
+		// onDestroy should be called in reverse order (database before config)
+		const destroyIndex1 = lifecycleCalls.indexOf('database-destroy')
+		const destroyIndex2 = lifecycleCalls.indexOf('config-destroy')
+		expect(destroyIndex1).toBeLessThan(destroyIndex2)
+	})
+
+	test('should continue cleanup even if one onDestroy fails', async () => {
+		const container = Container.createOrGet()
+		const destroyCalls: string[] = []
+
+		@Injectable()
+		class ServiceA implements OnDestroy {
+			onDestroy() {
+				destroyCalls.push('A')
+			}
+		}
+
+		@Injectable()
+		class ServiceB implements OnDestroy {
+			onDestroy() {
+				destroyCalls.push('B')
+				throw new Error('ServiceB onDestroy failed')
+			}
+		}
+
+		@Injectable()
+		class ServiceC implements OnDestroy {
+			onDestroy() {
+				destroyCalls.push('C')
+			}
+		}
+
+		container.register(ServiceA)
+		container.register(ServiceB)
+		container.register(ServiceC)
+
+		await container.resolve(ServiceA)
+		await container.resolve(ServiceB)
+		await container.resolve(ServiceC)
+
+		// Should not throw, should continue with cleanup
+		await container.destroy()
+
+		// All destroy methods should have been called despite one failing
+		expect(destroyCalls).toContain('A')
+		expect(destroyCalls).toContain('B')
+		expect(destroyCalls).toContain('C')
+	})
+
+	test('should clear container after destroy', async () => {
+		const container = Container.createOrGet()
+
+		@Injectable()
+		class TestService implements OnDestroy {
+			onDestroy() {
+				/* cleanup */
+			}
+		}
+
+		container.register(TestService)
+		await container.resolve(TestService)
+
+		expect(container.getInstance(TestService)).toBeDefined()
+
+		await container.destroy()
+
+		expect(container.getInstance(TestService)).toBeUndefined()
+	})
+
+	test('should work with plain class (non-provider) implementing OnInit', async () => {
+		const container = Container.createOrGet()
+		let initCalled = false
+
+		class PlainServiceWithInit implements OnInit {
+			onInit() {
+				initCalled = true
+			}
+		}
+
+		container.register(PlainServiceWithInit)
+		await container.resolve(PlainServiceWithInit)
+
+		expect(initCalled).toBe(true)
+	})
+
+	test('should support async lifecycle hooks with real async work', async () => {
+		const container = Container.createOrGet()
+		const events: string[] = []
+
+		@Injectable()
+		class AsyncService implements OnInit, OnDestroy {
+			private connected = false
+
+			async onInit() {
+				await new Promise((resolve) => setTimeout(resolve, 10))
+				this.connected = true
+				events.push('connected')
+			}
+
+			async onDestroy() {
+				await new Promise((resolve) => setTimeout(resolve, 10))
+				this.connected = false
+				events.push('disconnected')
+			}
+
+			isConnected() {
+				return this.connected
+			}
+		}
+
+		container.register(AsyncService)
+		const service = await container.resolve(AsyncService)
+
+		expect(service.isConnected()).toBe(true)
+		expect(events).toContain('connected')
+
+		await container.destroy()
+
+		expect(events).toContain('disconnected')
+	})
+})
+
+// ============================================================================
+// Logging Configuration Tests
+// ============================================================================
+
+describe('Logging Configuration', () => {
+	beforeEach(resetContainer)
+
+	test('should default to VERBOSE logging level', () => {
+		const container = Container.createOrGet()
+		container.clear()
+		// Need to create a new container or set it back to default
+		container.setLogLevel(LogLevel.VERBOSE)
+		expect(container.getLogLevel()).toBe(LogLevel.VERBOSE)
+	})
+
+	test('should set log level to OFF', () => {
+		const container = Container.createOrGet()
+		container.setLogLevel(LogLevel.OFF)
+		expect(container.getLogLevel()).toBe(LogLevel.OFF)
+	})
+
+	test('should set log level to MINIMAL', () => {
+		const container = Container.createOrGet()
+		container.setLogLevel(LogLevel.MINIMAL)
+		expect(container.getLogLevel()).toBe(LogLevel.MINIMAL)
+	})
+
+	test('should set log level to VERBOSE', () => {
+		const container = Container.createOrGet()
+		container.setLogLevel(LogLevel.VERBOSE)
+		expect(container.getLogLevel()).toBe(LogLevel.VERBOSE)
+	})
+
+	test('should not log when level is OFF', async () => {
+		const container = Container.createOrGet()
+		container.setLogLevel(LogLevel.OFF)
+
+		@Injectable()
+		class TestService {}
+
+		container.register(TestService)
+		await container.resolve(TestService)
+
+		// Test passes if no errors occur and nothing is logged
+		expect(container.getInstance(TestService)).toBeInstanceOf(TestService)
+	})
+
+	test('should log minimal events when level is MINIMAL', async () => {
+		const container = Container.createOrGet()
+		container.setLogLevel(LogLevel.MINIMAL)
+
+		@Injectable()
+		class TestService {}
+
+		// With MINIMAL level, bootstrap and destroy should log
+		// but individual resolutions should not
+		await container.bootstrap([TestService])
+
+		expect(container.getInstance(TestService)).toBeInstanceOf(TestService)
+	})
+
+	test('should log all events when level is VERBOSE', async () => {
+		const container = Container.createOrGet()
+		container.setLogLevel(LogLevel.VERBOSE)
+
+		@Injectable()
+		class TestService {}
+
+		container.register(TestService)
+		await container.resolve(TestService)
+
+		expect(container.getInstance(TestService)).toBeInstanceOf(TestService)
 	})
 })

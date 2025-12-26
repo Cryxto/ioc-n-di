@@ -14,6 +14,77 @@ import 'reflect-metadata'
 // biome-ignore lint/suspicious/noExplicitAny: Constructor args can be any type
 export type Constructor<T = unknown> = new (...args: any[]) => T
 
+// ============================================================================
+// Logging Configuration
+// ============================================================================
+
+/**
+ * Log levels for controlling container output verbosity
+ *
+ * @example
+ * const container = Container.createOrGet()
+ * container.setLogLevel(LogLevel.OFF) // Disable all logging
+ */
+export enum LogLevel {
+	/** No logging output */
+	OFF = 'OFF',
+	/** Minimal logging - only important events (bootstrap, destroy) */
+	MINIMAL = 'MINIMAL',
+	/** Verbose logging - all registration and resolution details */
+	VERBOSE = 'VERBOSE',
+}
+
+// ============================================================================
+// Lifecycle Interfaces (NestJS-style)
+// ============================================================================
+
+/**
+ * Interface for lifecycle hook called after instance initialization
+ *
+ * Classes implementing this interface will have their onInit() method
+ * called automatically after the instance is created and dependencies are injected.
+ *
+ * @example
+ * &#64;Injectable()
+ * class MyService implements OnInit {
+ *   async onInit() {
+ *     console.log('Service initialized')
+ *     await this.connectToDatabase()
+ *   }
+ * }
+ */
+export interface OnInit {
+	/**
+	 * Called after the instance is created and dependencies are injected
+	 * Can be async or sync
+	 */
+	onInit(): Promise<void> | void
+}
+
+/**
+ * Interface for lifecycle hook called before instance destruction
+ *
+ * Classes implementing this interface will have their onDestroy() method
+ * called automatically when the container is destroyed.
+ * Use this to clean up resources like database connections, timers, etc.
+ *
+ * @example
+ * &#64;Injectable()
+ * class DatabaseService implements OnDestroy {
+ *   async onDestroy() {
+ *     console.log('Closing database connection')
+ *     await this.connection.close()
+ *   }
+ * }
+ */
+export interface OnDestroy {
+	/**
+	 * Called before the instance is destroyed
+	 * Can be async or sync
+	 */
+	onDestroy(): Promise<void> | void
+}
+
 /**
  * Token used to identify a dependency in the container
  * Can be a string, symbol, or class constructor
@@ -33,7 +104,8 @@ export type InjectionToken<T = unknown> = string | symbol | Constructor<T>
  *   provide: 'MyService',
  *   useClass: MyServiceImpl,
  *   deps: [ConfigService], // Optional: for weight calculation
- *   onInit: async (instance) => await instance.initialize()
+ *   onInit: async (instance) => await instance.initialize(),
+ *   onDestroy: async (instance) => await instance.cleanup()
  * }
  */
 export interface ClassProvider<T = unknown> {
@@ -46,6 +118,8 @@ export interface ClassProvider<T = unknown> {
 	deps?: (InjectionToken | Constructor<any>)[]
 	/** Optional lifecycle hook called after instantiation */
 	onInit?: (instance: T) => Promise<void> | void
+	/** Optional lifecycle hook called before destruction */
+	onDestroy?: (instance: T) => Promise<void> | void
 }
 
 /**
@@ -72,7 +146,8 @@ export interface ValueProvider<T = unknown> {
  *   provide: 'DATABASE',
  *   useFactory: (config: Config) => new Database(config),
  *   deps: [ConfigService],
- *   onInit: async (db) => await db.connect()
+ *   onInit: async (db) => await db.connect(),
+ *   onDestroy: async (db) => await db.disconnect()
  * }
  */
 export interface FactoryProvider<T = unknown> {
@@ -86,6 +161,8 @@ export interface FactoryProvider<T = unknown> {
 	deps?: (InjectionToken | Constructor<any>)[]
 	/** Optional lifecycle hook called after instantiation */
 	onInit?: (instance: T) => Promise<void> | void
+	/** Optional lifecycle hook called before destruction */
+	onDestroy?: (instance: T) => Promise<void> | void
 }
 
 /**
@@ -595,6 +672,18 @@ export class Container {
 		number
 	>()
 
+	// Track provider metadata for lifecycle hooks
+	private readonly providerMetadata = new Map<
+		InjectionToken | Constructor<unknown>,
+		{
+			provider: Provider<unknown>
+			onDestroy?: (instance: unknown) => Promise<void> | void
+		}
+	>()
+
+	// Logging configuration
+	private logLevel: LogLevel = LogLevel.VERBOSE
+
 	private constructor() {}
 
 	/**
@@ -636,6 +725,76 @@ export class Container {
 		this.instances.clear()
 		this.resolutionStack.clear()
 		this.weightCache.clear()
+		this.providerMetadata.clear()
+	}
+
+	/**
+	 * Set the logging level for the container
+	 *
+	 * Controls how much information the container logs during operation.
+	 *
+	 * @param level - The desired log level
+	 *
+	 * @example
+	 * // Disable all logging
+	 * container.setLogLevel(LogLevel.OFF)
+	 *
+	 * @example
+	 * // Only log important events
+	 * container.setLogLevel(LogLevel.MINIMAL)
+	 *
+	 * @example
+	 * // Log all details (default)
+	 * container.setLogLevel(LogLevel.VERBOSE)
+	 */
+	public setLogLevel(level: LogLevel): void {
+		this.logLevel = level
+	}
+
+	/**
+	 * Get the current logging level
+	 *
+	 * @returns The current log level
+	 *
+	 * @example
+	 * const level = container.getLogLevel()
+	 */
+	public getLogLevel(): LogLevel {
+		return this.logLevel
+	}
+
+	/**
+	 * Log a message if the current log level allows it
+	 *
+	 * @private
+	 * @param message - The message to log
+	 * @param level - The minimum log level required to log this message
+	 */
+	private log(message: string, level: LogLevel = LogLevel.VERBOSE): void {
+		if (this.logLevel === LogLevel.OFF) {
+			return
+		}
+
+		if (level === LogLevel.MINIMAL && this.logLevel === LogLevel.MINIMAL) {
+			console.log(message)
+			return
+		}
+
+		if (this.logLevel === LogLevel.VERBOSE) {
+			console.log(message)
+		}
+	}
+
+	/**
+	 * Log an error message (always logged unless OFF)
+	 *
+	 * @private
+	 * @param message - The error message to log
+	 */
+	private logError(message: string): void {
+		if (this.logLevel !== LogLevel.OFF) {
+			console.error(message)
+		}
 	}
 
 	/**
@@ -689,14 +848,34 @@ export class Container {
 		const key = this.getProviderKey(provider)
 
 		if (this.isClassProvider(provider)) {
-			console.log(`Registering class provider: ${String(key)}`)
+			this.log(`Registering class provider: ${String(key)}`)
+			// Store onDestroy hook if provided
+			if (provider.onDestroy) {
+				// biome-ignore lint/suspicious/noExplicitAny: Need to cast for type compatibility
+				const onDestroyFn = provider.onDestroy as any
+				this.providerMetadata.set(key, {
+					// @ts-expect-error - Provider<T> and Provider<unknown> type mismatch
+					provider,
+					onDestroy: onDestroyFn,
+				})
+			}
 		} else if (this.isValueProvider(provider)) {
-			console.log(`Registering value provider: ${String(key)}`)
+			this.log(`Registering value provider: ${String(key)}`)
 			this.instances.set(key, provider.useValue)
 		} else if (this.isFactoryProvider(provider)) {
-			console.log(`Registering factory provider: ${String(key)}`)
+			this.log(`Registering factory provider: ${String(key)}`)
+			// Store onDestroy hook if provided
+			if (provider.onDestroy) {
+				// biome-ignore lint/suspicious/noExplicitAny: Need to cast for type compatibility
+				const onDestroyFn = provider.onDestroy as any
+				this.providerMetadata.set(key, {
+					// @ts-expect-error - Provider<T> and Provider<unknown> type mismatch
+					provider,
+					onDestroy: onDestroyFn,
+				})
+			}
 		} else {
-			console.log(`Registering class: ${key.toString()}`)
+			this.log(`Registering class: ${key.toString()}`)
 		}
 
 		// @ts-expect-error - Provider<unknown> doesn't match Provider<T>
@@ -816,11 +995,11 @@ export class Container {
 		token: InjectionToken<T> | Constructor<T>,
 		skipCircularCheck = false,
 	): Promise<T> {
-		console.log(`Resolving: ${this.getTokenName(token)}`)
+		this.log(`Resolving: ${this.getTokenName(token)}`)
 
 		// Check if already instantiated
 		if (this.instances.has(token)) {
-			console.log(`  -> Returning cached instance`)
+			this.log(`  -> Returning cached instance`)
 			return this.instances.get(token) as T
 		}
 
@@ -855,23 +1034,48 @@ export class Container {
 
 			if (this.isClassProvider(provider)) {
 				instance = await this.instantiateClass(provider.useClass)
-				// Call onInit lifecycle hook if provided
+				// Call provider-level onInit lifecycle hook if provided
 				if (provider.onInit) {
-					console.log(`  -> Calling onInit for: ${this.getTokenName(token)}`)
+					this.log(
+						`  -> Calling provider onInit for: ${this.getTokenName(token)}`,
+					)
 					await provider.onInit(instance)
+				}
+				// Call instance-level onInit method if it implements OnInit
+				if (this.hasOnInit(instance)) {
+					this.log(
+						`  -> Calling instance onInit for: ${this.getTokenName(token)}`,
+					)
+					await instance.onInit()
 				}
 			} else if (this.isValueProvider(provider)) {
 				instance = provider.useValue
 			} else if (this.isFactoryProvider(provider)) {
 				instance = await this.instantiateFactory(provider)
-				// Call onInit lifecycle hook if provided
+				// Call provider-level onInit lifecycle hook if provided
 				if (provider.onInit) {
-					console.log(`  -> Calling onInit for: ${this.getTokenName(token)}`)
+					this.log(
+						`  -> Calling provider onInit for: ${this.getTokenName(token)}`,
+					)
 					await provider.onInit(instance)
+				}
+				// Call instance-level onInit method if it implements OnInit
+				if (this.hasOnInit(instance)) {
+					this.log(
+						`  -> Calling instance onInit for: ${this.getTokenName(token)}`,
+					)
+					await instance.onInit()
 				}
 			} else {
 				// Plain class constructor
 				instance = await this.instantiateClass(provider as Constructor<T>)
+				// Call instance-level onInit method if it implements OnInit
+				if (this.hasOnInit(instance)) {
+					this.log(
+						`  -> Calling instance onInit for: ${this.getTokenName(token)}`,
+					)
+					await instance.onInit()
+				}
 			}
 
 			this.instances.set(token, instance)
@@ -895,7 +1099,7 @@ export class Container {
 	private async instantiateClass<T = unknown>(
 		target: Constructor<T>,
 	): Promise<T> {
-		console.log(`  -> Instantiating class: ${target.name}`)
+		this.log(`  -> Instantiating class: ${target.name}`)
 
 		// Get injection tokens if specified via @Inject decorator
 		const injectionTokens: unknown[] =
@@ -915,7 +1119,7 @@ export class Container {
 			if (token) {
 				// Check if it's the new @Lazy decorator pattern
 				if (token && typeof token === 'object' && '__lazyToken' in token) {
-					console.log(`    -> Creating LazyRef wrapper`)
+					this.log(`    -> Creating LazyRef wrapper`)
 					// @ts-expect-error - token.__lazyToken is unknown but we know it's an InjectionToken
 					dependencies.push(new LazyRef(this, token.__lazyToken))
 					continue
@@ -923,20 +1127,20 @@ export class Container {
 
 				// Check if it's the old lazy() function pattern (LazyRefMarker)
 				if (token instanceof LazyRefMarker) {
-					console.log(`    -> Creating LazyRef wrapper (old style)`)
+					this.log(`    -> Creating LazyRef wrapper (old style)`)
 					const actualClass = token.ref()
 					dependencies.push(new LazyRef(this, actualClass))
 					continue
 				}
 
-				console.log(`    -> Resolving @Inject token: ${String(token)}`)
+				this.log(`    -> Resolving @Inject token: ${String(token)}`)
 				dependencies.push(await this.resolve(token as InjectionToken))
 				continue
 			}
 
 			// Otherwise, use the parameter type
 			if (paramType) {
-				console.log(`    -> Resolving parameter type: ${paramType.name}`)
+				this.log(`    -> Resolving parameter type: ${paramType.name}`)
 				dependencies.push(await this.resolve(paramType))
 				continue
 			}
@@ -948,7 +1152,7 @@ export class Container {
 		}
 
 		const instance = new target(...dependencies)
-		console.log(`  -> Created instance of ${target.name}`)
+		this.log(`  -> Created instance of ${target.name}`)
 		return instance
 	}
 
@@ -963,7 +1167,7 @@ export class Container {
 	private async instantiateFactory<T>(
 		provider: FactoryProvider<T>,
 	): Promise<T> {
-		console.log(`  -> Calling factory for: ${String(provider.provide)}`)
+		this.log(`  -> Calling factory for: ${String(provider.provide)}`)
 
 		// Resolve dependencies sequentially
 		// biome-ignore lint/suspicious/noExplicitAny: Dependencies can be of any type
@@ -1175,7 +1379,10 @@ export class Container {
 		// biome-ignore lint/suspicious/noExplicitAny: Can contain constructors and instances of any type
 		Map<InjectionToken | Constructor<any>, any>
 	> {
-		console.log('\n🔄 Resolving all providers in optimal order...\n')
+		this.log(
+			'\n🔄 Resolving all providers in optimal order...\n',
+			LogLevel.MINIMAL,
+		)
 
 		const sorted = this.getProvidersByWeight()
 		// biome-ignore lint/suspicious/noExplicitAny: Lazy targets can be of any type
@@ -1213,22 +1420,22 @@ export class Container {
 		// First pass: resolve non-lazy services
 		for (const { token, weight } of sorted) {
 			if (!this.instances.has(token) && !lazyTargets.has(token)) {
-				console.log(`[Weight ${weight}] Resolving: ${this.getTokenName(token)}`)
+				this.log(`[Weight ${weight}] Resolving: ${this.getTokenName(token)}`)
 				try {
 					// biome-ignore lint/suspicious/noExplicitAny: Token can be constructor or string/symbol
 					await this.resolve(token as any)
 					// biome-ignore lint/suspicious/noExplicitAny: Error can be of any type
 				} catch (error: any) {
-					console.log(`  ✗ Failed: ${error.message}`)
+					this.log(`  ✗ Failed: ${error.message}`)
 				}
 			}
 		}
 
 		// Second pass: resolve lazy-referenced services (low priority)
-		console.log('\nResolving lazy-referenced services (low priority)...\n')
+		this.log('\nResolving lazy-referenced services (low priority)...\n')
 		for (const { token, weight } of sorted) {
 			if (!this.instances.has(token) && lazyTargets.has(token)) {
-				console.log(
+				this.log(
 					`[Lazy, Weight ${weight}] Resolving: ${this.getTokenName(token)}`,
 				)
 				try {
@@ -1236,12 +1443,12 @@ export class Container {
 					await this.resolve(token as any)
 					// biome-ignore lint/suspicious/noExplicitAny: Error can be of any type
 				} catch (error: any) {
-					console.log(`  ✗ Failed: ${error.message}`)
+					this.log(`  ✗ Failed: ${error.message}`)
 				}
 			}
 		}
 
-		console.log('\n✅ All providers resolved!\n')
+		this.log('\n✅ All providers resolved!\n', LogLevel.MINIMAL)
 		return this.instances
 	}
 
@@ -1281,7 +1488,7 @@ export class Container {
 	public async bootstrap(
 		providersOrConfig: Provider<any>[] | { providers: Provider<any>[] },
 	): Promise<this> {
-		console.log('\n🚀 Bootstrapping container...\n')
+		this.log('\n🚀 Bootstrapping container...\n', LogLevel.MINIMAL)
 
 		// Handle both array and object format
 		const providers = Array.isArray(providersOrConfig)
@@ -1289,9 +1496,9 @@ export class Container {
 			: providersOrConfig.providers
 
 		// Flatten groups in the providers array
-		console.log('Flattening groups...')
+		this.log('Flattening groups...')
 		const flattenedProviders = this.flattenProviders(providers)
-		console.log(
+		this.log(
 			`Flattened ${providers.length} items into ${flattenedProviders.length} providers\n`,
 		)
 
@@ -1303,7 +1510,7 @@ export class Container {
 		// Resolve all providers
 		await this.resolveAll()
 
-		console.log('🎉 Container bootstrapped successfully!\n')
+		this.log('🎉 Container bootstrapped successfully!\n', LogLevel.MINIMAL)
 		return this
 	}
 
@@ -1515,5 +1722,92 @@ export class Container {
 			return token.name
 		}
 		return String(token)
+	}
+
+	/**
+	 * Check if an instance implements the OnInit interface
+	 *
+	 * @private
+	 * @param instance - The instance to check
+	 * @returns True if the instance has an onInit method
+	 */
+	private hasOnInit(instance: unknown): instance is OnInit {
+		return (
+			typeof instance === 'object' &&
+			instance !== null &&
+			'onInit' in instance &&
+			typeof instance.onInit === 'function'
+		)
+	}
+
+	/**
+	 * Check if an instance implements the OnDestroy interface
+	 *
+	 * @private
+	 * @param instance - The instance to check
+	 * @returns True if the instance has an onDestroy method
+	 */
+	private hasOnDestroy(instance: unknown): instance is OnDestroy {
+		return (
+			typeof instance === 'object' &&
+			instance !== null &&
+			'onDestroy' in instance &&
+			typeof instance.onDestroy === 'function'
+		)
+	}
+
+	/**
+	 * Destroy the container and clean up all resources
+	 *
+	 * Calls onDestroy lifecycle hooks on all instances that implement OnDestroy
+	 * or have an onDestroy hook defined in their provider configuration.
+	 * Use this when shutting down your application to properly clean up resources.
+	 *
+	 * @returns A promise that resolves when all cleanup is complete
+	 *
+	 * @example
+	 * // During application shutdown
+	 * await container.destroy()
+	 */
+	public async destroy(): Promise<void> {
+		this.log(
+			'\n🔄 Destroying container and cleaning up resources...\n',
+			LogLevel.MINIMAL,
+		)
+
+		// Call onDestroy hooks in reverse order of instantiation
+		const tokens = Array.from(this.instances.keys()).reverse()
+
+		for (const token of tokens) {
+			const instance = this.instances.get(token)
+			if (!instance) continue
+
+			const tokenName = this.getTokenName(token)
+
+			try {
+				// First, call provider-level onDestroy hook if exists
+				const metadata = this.providerMetadata.get(token)
+				if (metadata?.onDestroy) {
+					this.log(`  -> Calling provider onDestroy for: ${tokenName}`)
+					await metadata.onDestroy(instance)
+				}
+
+				// Then, call instance-level onDestroy method if it implements OnDestroy
+				if (this.hasOnDestroy(instance)) {
+					this.log(`  -> Calling instance onDestroy for: ${tokenName}`)
+					await instance.onDestroy()
+				}
+				// biome-ignore lint/suspicious/noExplicitAny: Error can be of any type
+			} catch (error: any) {
+				this.logError(
+					`  ✗ Error during destroy of ${tokenName}: ${error.message}`,
+				)
+			}
+		}
+
+		// Clear all containers
+		this.clear()
+
+		this.log('\n✅ Container destroyed successfully!\n', LogLevel.MINIMAL)
 	}
 }

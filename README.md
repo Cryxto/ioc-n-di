@@ -11,7 +11,9 @@ A lightweight, type-safe TypeScript IoC (Inversion of Control) container and dep
 - **Injectable metadata** for storing custom service information
 - **Lazy injection** support for circular dependencies
 - **Automatic dependency resolution** with circular dependency detection
-- **Lifecycle hooks** with `onInit` callbacks
+- **Lifecycle hooks** with `OnInit` and `OnDestroy` interfaces (NestJS-style)
+- **Container cleanup** with `destroy()` method for proper resource management
+- **Configurable logging** with OFF, MINIMAL, and VERBOSE levels
 - **Dependency graph visualization** for debugging
 - **Smart resolution ordering** based on dependency weights
 - **Singleton pattern** - all resolved instances are cached
@@ -221,31 +223,151 @@ serviceA.doSomething();
 
 ### Lifecycle Hooks
 
-Execute initialization logic after instantiation:
+Execute initialization and cleanup logic using NestJS-style lifecycle interfaces:
+
+#### OnInit and OnDestroy Interfaces
 
 ```typescript
-import { Container } from '@cryxto/ioc-n-di';
+import { Container, Injectable, OnInit, OnDestroy } from '@cryxto/ioc-n-di';
 
-class DatabaseConnection {
-  isConnected = false;
+@Injectable()
+class DatabaseService implements OnInit, OnDestroy {
+  private connection: any;
 
-  async connect() {
+  // Called after instance is created and dependencies are injected
+  async onInit() {
     console.log('Connecting to database...');
-    this.isConnected = true;
+    this.connection = await createConnection();
+  }
+
+  // Called when container.destroy() is invoked
+  async onDestroy() {
+    console.log('Closing database connection...');
+    await this.connection.close();
+  }
+
+  query(sql: string) {
+    return this.connection.query(sql);
+  }
+}
+
+const container = Container.createOrGet();
+container.register(DatabaseService);
+const db = await container.resolve(DatabaseService);
+// onInit was called automatically
+
+// During application shutdown
+await container.destroy();
+// onDestroy was called automatically
+```
+
+#### Provider-Level Hooks
+
+You can also use lifecycle hooks directly in provider configuration:
+
+```typescript
+container.register({
+  provide: 'DATABASE',
+  useFactory: () => createConnection(),
+  onInit: async (conn) => {
+    console.log('Database connection initialized');
+    await conn.authenticate();
+  },
+  onDestroy: async (conn) => {
+    console.log('Closing database connection');
+    await conn.close();
+  },
+});
+
+const db = await container.resolve('DATABASE');
+// onInit was called
+
+await container.destroy();
+// onDestroy was called
+```
+
+#### Combining Both Approaches
+
+Provider hooks run before instance hooks:
+
+```typescript
+@Injectable()
+class Service implements OnInit {
+  async onInit() {
+    console.log('2. Instance onInit');
   }
 }
 
 container.register({
-  provide: DatabaseConnection,
-  useClass: DatabaseConnection,
+  provide: Service,
+  useClass: Service,
   onInit: async (instance) => {
-    await instance.connect();
-    console.log('Database initialized');
+    console.log('1. Provider onInit');
   },
 });
 
-const db = await container.resolve(DatabaseConnection);
-console.log(db.isConnected); // true
+await container.resolve(Service);
+// Output:
+// 1. Provider onInit
+// 2. Instance onInit
+```
+
+### Logging Configuration
+
+Control the verbosity of container logging output:
+
+```typescript
+import { Container, LogLevel } from '@cryxto/ioc-n-di';
+
+const container = Container.createOrGet();
+
+// Disable all logging (recommended for production)
+container.setLogLevel(LogLevel.OFF);
+
+// Minimal logging - only important events (bootstrap, destroy)
+container.setLogLevel(LogLevel.MINIMAL);
+
+// Verbose logging - all registration and resolution details (default)
+container.setLogLevel(LogLevel.VERBOSE);
+
+// Check current log level
+const currentLevel = container.getLogLevel();
+console.log(currentLevel); // 'VERBOSE', 'MINIMAL', or 'OFF'
+```
+
+#### Log Levels Explained
+
+- **`LogLevel.OFF`** - No logging output at all (recommended for production)
+- **`LogLevel.MINIMAL`** - Only logs important events:
+  - Bootstrap start and completion
+  - Container destruction
+  - Errors during cleanup
+- **`LogLevel.VERBOSE`** - Logs everything (default, useful for debugging):
+  - All provider registrations
+  - All dependency resolutions
+  - Lifecycle hook invocations
+  - Lazy reference creation
+  - All minimal events
+
+#### Example: Production Setup
+
+```typescript
+import { Container, LogLevel } from '@cryxto/ioc-n-di';
+
+const container = Container.createOrGet();
+
+// Disable logs in production, enable in development
+if (process.env.NODE_ENV === 'production') {
+  container.setLogLevel(LogLevel.OFF);
+} else {
+  container.setLogLevel(LogLevel.VERBOSE);
+}
+
+await container.bootstrap([
+  ConfigService,
+  DatabaseService,
+  AppService
+]);
 ```
 
 ### NestJS-Style Bootstrapping (Recommended)
@@ -521,11 +643,14 @@ The main DI container (singleton pattern).
 - `static getContainer(): Container` - **Deprecated:** Use `createOrGet()` instead
 - `register<T>(provider: Provider<T>): void` - Register a provider
 - `resolve<T>(token: InjectionToken<T> | Constructor<T>): Promise<T>` - Resolve and return an instance
-- `bootstrap(providers: Provider[] | { providers: Provider[] }): Promise<this>` - **New:** Register and resolve all providers at once (NestJS-style)
+- `bootstrap(providers: Provider[] | { providers: Provider[] }): Promise<this>` - Register and resolve all providers at once (NestJS-style)
+- `destroy(): Promise<void>` - **New:** Destroy the container and call all onDestroy lifecycle hooks
 - `getInstance<T>(token: InjectionToken<T> | Constructor<T>): T | undefined` - Get cached instance synchronously
 - `getInstanceOrThrow<T>(token: InjectionToken<T> | Constructor<T>): T` - Get cached instance or throw
 - `resolveAll(): Promise<Map>` - Resolve all registered providers in optimal order
 - `clear(): void` - Clear all providers and instances (useful for testing)
+- `setLogLevel(level: LogLevel): void` - **New:** Set the logging level (OFF, MINIMAL, or VERBOSE)
+- `getLogLevel(): LogLevel` - **New:** Get the current logging level
 - `getDependencyGraph(): Map` - Get dependency graph for visualization
 - `calculateWeight(token): number` - Calculate dependency weight for a token
 
@@ -552,7 +677,8 @@ The main DI container (singleton pattern).
   provide: InjectionToken,
   useClass: Constructor,
   deps?: InjectionToken[],  // Optional: for weight calculation and ordering
-  onInit?: (instance) => void | Promise<void>
+  onInit?: (instance) => void | Promise<void>,
+  onDestroy?: (instance) => void | Promise<void>  // New: cleanup hook
 }
 
 // Value Provider
@@ -566,7 +692,8 @@ The main DI container (singleton pattern).
   provide: InjectionToken,
   useFactory: (...args) => any,
   deps?: InjectionToken[],  // Dependencies injected into factory + affects weight
-  onInit?: (instance) => void | Promise<void>
+  onInit?: (instance) => void | Promise<void>,
+  onDestroy?: (instance) => void | Promise<void>  // New: cleanup hook
 }
 
 // Group (created with @Group decorator)
@@ -625,7 +752,7 @@ container.register({
 ### Testing
 
 ```typescript
-import { Container } from '@cryxto/ioc-n-di';
+import { Container, LogLevel } from '@cryxto/ioc-n-di';
 
 describe('MyService', () => {
   let container: Container;
@@ -633,6 +760,7 @@ describe('MyService', () => {
   beforeEach(() => {
     container = Container.createOrGet();
     container.clear(); // Clear between tests
+    container.setLogLevel(LogLevel.OFF); // Disable logging during tests
   });
 
   it('should inject dependencies', async () => {
@@ -641,6 +769,28 @@ describe('MyService', () => {
 
     const service = await container.resolve(MyService);
     expect(service).toBeDefined();
+  });
+
+  // Test lifecycle hooks
+  it('should call lifecycle hooks', async () => {
+    const lifecycleCalls: string[] = [];
+
+    class ServiceWithLifecycle implements OnInit, OnDestroy {
+      async onInit() {
+        lifecycleCalls.push('init');
+      }
+
+      async onDestroy() {
+        lifecycleCalls.push('destroy');
+      }
+    }
+
+    container.register(ServiceWithLifecycle);
+    await container.resolve(ServiceWithLifecycle);
+    expect(lifecycleCalls).toContain('init');
+
+    await container.destroy();
+    expect(lifecycleCalls).toContain('destroy');
   });
 });
 ```
@@ -652,7 +802,9 @@ describe('MyService', () => {
 3. **Dependency Graph**: Builds a dependency graph and calculates optimal resolution order
 4. **Instantiation**: Creates instances in the correct order, injecting dependencies
 5. **Caching**: All instances are cached as singletons
-6. **Lifecycle**: Calls `onInit` hooks after instantiation if provided
+6. **Lifecycle**:
+   - Calls `onInit` hooks after instantiation if provided
+   - Calls `onDestroy` hooks during cleanup when `container.destroy()` is invoked
 
 ## Circular Dependencies
 
